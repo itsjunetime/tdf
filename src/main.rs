@@ -1,7 +1,7 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{io::stdout, path::PathBuf, str::FromStr};
 
 use converter::Converter;
-use crossterm::{execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
+use crossterm::{execute, terminal::{disable_raw_mode, enable_raw_mode, EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen}};
 use glib::{LogField, LogLevel, LogWriterOutput};
 use notify::{RecursiveMode, Watcher};
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -137,9 +137,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		}
 
 		if needs_redraw {
+			let mut end_update = false;
 			term.draw(|f| {
-				tui.render(f, &main_area);
+				tui.render(f, &main_area, &mut end_update);
+				// f.bypass_diff = true;
 			})?;
+			if end_update {
+				execute!(stdout(), EndSynchronizedUpdate)?;
+			}
 		}
 	}
 

@@ -1,6 +1,6 @@
-use std::rc::Rc;
+use std::{io::stdout, rc::Rc};
 
-use crossterm::event::{Event, KeyCode, MouseEventKind};
+use crossterm::{event::{Event, KeyCode, MouseEventKind}, execute, terminal::BeginSynchronizedUpdate};
 use ratatui::{layout::{Constraint, Flex, Layout, Rect}, style::{Color, Style}, text::Span, widgets::{Block, Borders, Padding}, Frame};
 use ratatui_image::{protocol::Protocol, Image};
 
@@ -52,7 +52,7 @@ impl Tui {
 			.split(frame.size())
 	}
 
-	pub fn render(&mut self, frame: &mut Frame<'_>, main_area: &[Rect]) {
+	pub fn render(&mut self, frame: &mut Frame<'_>, main_area: &[Rect], end_update: &mut bool) {
 		let top_block = Block::new()
 			.padding(Padding {
 				right: 2,
@@ -143,7 +143,6 @@ impl Tui {
 			// resize this time), then go through every element in the buffer where any Image would
 			// be written and set to skip it so that ratatui doesn't spend a lot of time diffing it
 			// each re-render
-			self.last_render.rect = size;
 			frame.render_widget(Skip::new(true), img_area);
 		} else {
 			// here we calculate how many pages can fit in the available area.
@@ -178,6 +177,9 @@ impl Tui {
 				// If none are ready to render, just show the loading thing
 				Self::render_loading_in(frame, img_area);
 			} else {
+				execute!(stdout(), BeginSynchronizedUpdate).unwrap();
+				*end_update = true;
+
 				let total_width = page_widths
 					.iter()
 					.map(|(_, w)| w)
@@ -199,11 +201,10 @@ impl Tui {
 					self.render_single_page(frame, page_idx + self.page, Rect { width, ..img_area });
 					img_area.x += width;
 				}
-				// frame.bypass_diff = true;
 
 				// we want to set this at the very end so it doesn't get set somewhere halfway through and
 				// then the whole diffing thing messes it up
-				self.last_render.rect = frame.size();
+				self.last_render.rect = size;
 			}
 		}
 	}

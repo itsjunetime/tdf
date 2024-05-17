@@ -25,8 +25,7 @@ pub enum RenderInfo {
 
 pub struct ImageData {
 	pub data: Vec<u8>,
-	pub width: u16,
-	pub _height: u16
+	pub area: Rect
 }
 
 // this function has to be sync (non-async) because the poppler::Document needs to be held during
@@ -226,7 +225,10 @@ fn render_single_page(
 
 	Ok(ImageData {
 		data: img_data,
-		width: surface_width as u16 / col_w,
-		_height: surface_height as u16 / col_h
+		area: Rect {
+			width: surface_width as u16 / col_w,
+			height: surface_height as u16 / col_h,
+			..Rect::default()
+		}
 	})
 }

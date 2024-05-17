@@ -1,39 +1,27 @@
 use std::rc::Rc;
 
 use crossterm::event::{Event, KeyCode, MouseEventKind};
-use image::ImageFormat;
 use ratatui::{layout::{Constraint, Flex, Layout, Rect}, style::{Color, Style}, text::Span, widgets::{Block, Borders, Padding}, Frame};
-use ratatui_image::{picker::Picker, protocol::Protocol, Image, Resize};
+use ratatui_image::{protocol::Protocol, Image};
 
-use crate::{renderer::{ImageData, RenderError}, skip::Skip};
+use crate::{renderer::RenderError, skip::Skip};
 
 pub struct Tui {
 	name: String,
 	page: usize,
 	error: Option<String>,
 	input_state: Option<InputCommand>,
-	// Used as a way to track if we need to draw the images, to save ratatui from doing a lot of
-	// diffing work
 	last_render: LastRender,
-	// So we hold the `Picker` here and store the `RenderedImage` as a option between the
-	// `DynamicImage` and `Box<dyn Protocol>` because the Protocol thing is much less
-	// space-effecient (since it needs to store like a large string instead of just bytes of data)
-	// so we want to store them as `DynamicImage`s until they're shown, at which point we render
-	// them to the `Box<dyn Protocol>` and keep them like that
-	picker: Picker,
-	rendered: Vec<Option<RenderedImage>>,
+	rendered: Vec<Option<Box<dyn Protocol>>>,
 }
 
 #[derive(Default, Debug)]
 struct LastRender {
+	// Used as a way to track if we need to draw the images, to save ratatui from doing a lot of
+	// diffing work
 	rect: Rect,
 	pages_shown: usize,
 	unused_width: u16
-}
-
-enum RenderedImage {
-	Data(ImageData),
-	Image(Box<dyn Protocol>)
 }
 
 enum InputCommand {
@@ -41,15 +29,14 @@ enum InputCommand {
 }
 
 impl Tui {
-	pub fn new(name: String, picker: Picker) -> Tui {
+	pub fn new(name: String) -> Tui {
 		Self {
 			name,
 			page: 0,
 			error: None,
 			input_state: None,
-			picker,
 			last_render: LastRender::default(),
-			rendered: vec![]
+			rendered: vec![],
 		}
 	}
 
@@ -172,10 +159,7 @@ impl Tui {
 				.flat_map(|(idx, page)|
 					page.as_ref().map(|img| (
 						idx,
-						match img {
-							RenderedImage::Data(data) => data.width,
-							RenderedImage::Image(img) => img.rect().width,
-						}
+						img.rect().width,
 					))
 				)
 				// and then take them as long as they won't overflow the available area.
@@ -192,7 +176,7 @@ impl Tui {
 
 			if page_widths.is_empty() {
 				// If none are ready to render, just show the loading thing
-				Self::render_loading_in(frame, img_area)
+				Self::render_loading_in(frame, img_area);
 			} else {
 				let total_width = page_widths
 					.iter()
@@ -226,36 +210,7 @@ impl Tui {
 
 	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
 		match self.rendered[page_idx] {
-			Some(ref page_img) => {
-				let txt_img = match page_img {
-					RenderedImage::Data(img_data) => {
-						let dyn_img = image::load_from_memory_with_format(&img_data.data, ImageFormat::Png)
-							.expect("Cairo produced invalid png data; that really shouldn't happen");
-
-						// We don't actually want to Crop this image, but we've already
-						// verified (with the ImageSurface stuff) that the image is the correct
-						// size for the area given, so to save ratatui the work of having to
-						// resize it, we tell them to crop it to fit.
-						let txt_img = match self.picker.new_protocol(dyn_img, img_area, Resize::Crop) {
-							Ok(img) => img,
-							Err(e) => {
-								self.error = Some(format!("Couldn't convert DynamicImage to ratatui image: {e}"));
-								return;
-							}
-						};
-
-						self.rendered[page_idx] = Some(RenderedImage::Image(txt_img));
-						let Some(RenderedImage::Image(ref txt)) = self.rendered[page_idx] else {
-							unreachable!();
-						};
-
-						txt
-					}
-					RenderedImage::Image(ref img) => img,
-				};
-
-				frame.render_widget(Image::new(&**txt_img), img_area);
-			},
+			Some(ref page_img) => frame.render_widget(Image::new(&**page_img), img_area),
 			None => Self::render_loading_in(frame, img_area)
 		};
 	}
@@ -284,7 +239,10 @@ impl Tui {
 			PageChange::Prev => self.set_page(self.page.saturating_sub(diff)),
 		}
 
-		(old != self.page).then_some(InputAction::Redraw)
+		match self.page as isize - old as isize {
+			0 => None,
+			change => Some(InputAction::ChangePageBy(change))
+		}
 	}
 
 	pub fn set_n_pages(&mut self, n_pages: usize) {
@@ -292,25 +250,30 @@ impl Tui {
 		for _ in 0..n_pages {
 			self.rendered.push(None);
 		}
-		// mark that we need to re-render the images
+		self.page = self.page.min(n_pages - 1);
 	}
 
-	pub fn page_ready(&mut self, img: ImageData, page_num: usize) {
+	pub fn page_ready(&mut self, img: Box<dyn Protocol>, page_num: usize) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
 		// the last rect marker so that all images are forced to redraw on next render and this one
 		// is drawn with them
-		if img.width <= self.last_render.unused_width {
-			let num_fit = self.last_render.unused_width / img.width;
-			if page_num >= self.page && (self.page + num_fit as usize) >= page_num {
-				self.last_render.rect = Rect::default();
+		if page_num == self.page {
+			self.last_render.rect = Rect::default();
+		} else {
+			let img_w = img.rect().width;
+			if img_w <= self.last_render.unused_width {
+				let num_fit = self.last_render.unused_width / img_w;
+				if page_num >= self.page && (self.page + num_fit as usize) >= page_num {
+					self.last_render.rect = Rect::default();
+				}
 			}
 		}
 
 		// We always just set this here because we handle reloading in the `set_n_pages` function.
 		// If the document was reloaded, then It'll have the `set_n_pages` called to set the new
 		// number of pages, so the vec will already be cleared
-		self.rendered[page_num] = Some(RenderedImage::Data(img));
+		self.rendered[page_num] = Some(img);
 	}
 
 	pub fn handle_event(&mut self, ev: Event) -> Option<InputAction> {
@@ -380,6 +343,7 @@ impl Tui {
 
 pub enum InputAction {
 	Redraw,
+	ChangePageBy(isize),
 	JumpingToPage(usize),
 	QuitApp
 }

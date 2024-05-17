@@ -1,0 +1,3 @@
+- Look into a way to tell ratatui to skip diffing and just overwrite the whole thing 'cause we know it won't save time
+- Look into more efficient 'skip'ing in ratatui so that you don't have to unicode_width::width a bunch of escape codes
+- Render to Box<dyn Protocol> aot but only in the vicinity of the current view to save space

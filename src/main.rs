@@ -1,5 +1,6 @@
 use std::{path::PathBuf, str::FromStr};
 
+use converter::Converter;
 use crossterm::{execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
 use glib::{LogField, LogLevel, LogWriterOutput};
 use notify::{RecursiveMode, Watcher};
@@ -11,6 +12,7 @@ use renderer::{RenderInfo, RenderNotif};
 
 mod tui;
 mod renderer;
+mod converter;
 mod skip;
 
 #[tokio::main(flavor = "current_thread")]
@@ -55,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.map(|n| n.to_string_lossy())
 		.unwrap_or_else(|| "Unknown file".into())
 		.to_string();
-	let mut tui = tui::Tui::new(file_name, picker);
+	let mut tui = tui::Tui::new(file_name);
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend)?;
@@ -64,6 +66,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// document's pages, then it will return `None`, but still log to stderr with CRITICAL level),
 	// so we want to just ignore all logging since this is a tui app.
 	glib::log_set_writer_func(noop);
+
+	let mut converter = Converter::new(picker);
 
 	execute!(
 		term.backend_mut(),
@@ -79,6 +83,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let mut needs_redraw;
 
 		tokio::select! {
+			Some(img_res) = converter.next() => {
+				match img_res {
+					Ok((img, page)) => tui.page_ready(img, page),
+					Err(e) => tui.show_error(e),
+				}
+				needs_redraw = true;
+			},
 			// First we check if we have any keystrokes
 			Some(ev) = ev_stream.next() => {
 				// If we can't get user input, just crash.
@@ -88,22 +99,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 					None => false,
 					Some(InputAction::Redraw) => true,
 					Some(InputAction::QuitApp) => break,
-					Some(InputAction::JumpingToPage(usize)) => {
-						tui_tx.send(RenderNotif::JumpToPage(usize)).await?;
+					Some(InputAction::ChangePageBy(change)) => {
+						converter.change_page_by(change);
+						true
+					},
+					Some(InputAction::JumpingToPage(page)) => {
+						tui_tx.send(RenderNotif::JumpToPage(page)).await?;
+						converter.go_to_page(page);
 						true
 					}
 				};
 			},
 			Some(renderer_msg) = tui_rx.recv() => {
-				match renderer_msg {
-					Ok(RenderInfo::NumPages(num)) => tui.set_n_pages(num),
-					// TODO maybe somehow add more incremental creation of ImageData where it
-					// renders them all to `Box<dyn Protocol>` only when you approach the page but
-					// still renders them to Vec<u8> no matter what?
-					Ok(RenderInfo::Page(img, page_num)) => tui.page_ready(img, page_num),
-					Err(e) => tui.show_error(e)
-				}
-				needs_redraw = true;
+				needs_redraw = match renderer_msg {
+					Ok(RenderInfo::NumPages(num)) => {
+						tui.set_n_pages(num);
+						converter.set_n_pages(num);
+						true
+					},
+					Ok(RenderInfo::Page(img, page_num)) => {
+						converter.add_img(img, page_num);
+						false
+					},
+					Err(e) => {
+						tui.show_error(e);
+						true
+					}
+				};
 			}
 		}
 

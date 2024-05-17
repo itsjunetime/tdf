@@ -97,6 +97,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			Some(renderer_msg) = tui_rx.recv() => {
 				match renderer_msg {
 					Ok(RenderInfo::NumPages(num)) => tui.set_n_pages(num),
+					// TODO maybe somehow add more incremental creation of ImageData where it
+					// renders them all to `Box<dyn Protocol>` only when you approach the page but
+					// still renders them to Vec<u8> no matter what?
 					Ok(RenderInfo::Page(img, page_num)) => tui.page_ready(img, page_num),
 					Err(e) => tui.show_error(e)
 				}

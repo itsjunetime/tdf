@@ -1,7 +1,5 @@
 use cairo::{Antialias, Format};
-use image::{DynamicImage, ImageFormat};
 use itertools::Itertools;
-use oxipng::Options;
 use poppler::{Document, Page};
 use ratatui::layout::Rect;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender};
@@ -22,7 +20,13 @@ pub enum RenderError {
 
 pub enum RenderInfo {
 	NumPages(usize),
-	Page(DynamicImage, usize)
+	Page(ImageData, usize)
+}
+
+pub struct ImageData {
+	pub data: Vec<u8>,
+	pub width: u16,
+	pub _height: u16
 }
 
 // this function has to be sync (non-async) because the poppler::Document needs to be held during
@@ -129,24 +133,7 @@ pub fn start_rendering(
 
 				// render the page
 				let to_send = render_single_page(page, area)
-					.and_then(|img_data| match image::load_from_memory_with_format(&img_data, ImageFormat::Png) {
-						Ok(img) => {
-							// TODO find some way to do oxipng stuff maybe. Perchance throw them
-							// all onto a new thread or whatever. idk.
-							/*let sender_clone = sender.clone();
-							std::thread::spawn(move || {
-								let optimized = oxipng::optimize_from_memory(
-									&img_data,
-									&Options::default()
-								).unwrap();
-								let img = image::load_from_memory_with_format(&optimized, ImageFormat::Png).unwrap();
-								sender_clone.blocking_send(Ok(RenderInfo::Page(img, num))).unwrap();
-							});*/
-							println!("data is {} while img is {}", img_data.len(), img.as_rgb8().unwrap().as_raw().len());
-							Ok(img)
-						},
-						Err(e) => Err(format!("Couldn't create DynamicImage: {e}"))
-					}).map(|img| RenderInfo::Page(img, num))
+					.map(|data| RenderInfo::Page(data, num))
 					.map_err(RenderError::Render);
 
 				// then send it over
@@ -171,8 +158,7 @@ pub fn start_rendering(
 fn render_single_page(
 	page: Page,
 	area: Rect,
-//) -> Result<DynamicImage, String> {
-) -> Result<Vec<u8>, String> {
+) -> Result<ImageData, String> {
 	// First, get the font size; the number of pixels (width x height) per font character (I
 	// think; it's at least something like that) on this terminal screen.
 	let size = crossterm::terminal::window_size()
@@ -238,9 +224,9 @@ fn render_single_page(
 	ctx.target().write_to_png(&mut img_data)
 		.map_err(|e| format!("Couldn't write surface to png: {e}"))?;
 
-	/*let img = image::load_from_memory_with_format(&img_data, ImageFormat::Png)
-		.map_err(|e| format!("Couldn't load image from provided data: {e}"))?;
-
-	Ok(img)*/
-	Ok(img_data)
+	Ok(ImageData {
+		data: img_data,
+		width: surface_width as u16 / col_w,
+		_height: surface_height as u16 / col_h
+	})
 }

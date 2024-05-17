@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
 use crossterm::event::{Event, KeyCode, MouseEventKind};
-use image::DynamicImage;
+use image::ImageFormat;
 use ratatui::{layout::{Constraint, Flex, Layout, Rect}, style::{Color, Style}, text::Span, widgets::{Block, Borders, Padding}, Frame};
 use ratatui_image::{picker::Picker, protocol::Protocol, Image, Resize};
 
-use crate::{renderer::RenderError, skip::Skip};
+use crate::{renderer::{ImageData, RenderError}, skip::Skip};
 
 pub struct Tui {
 	name: String,
@@ -32,8 +32,8 @@ struct LastRender {
 }
 
 enum RenderedImage {
-	Image(DynamicImage),
-	Text(Box<dyn Protocol>)
+	Data(ImageData),
+	Image(Box<dyn Protocol>)
 }
 
 enum InputCommand {
@@ -173,8 +173,8 @@ impl Tui {
 					page.as_ref().map(|img| (
 						idx,
 						match img {
-							RenderedImage::Image(img) => (img.width() / self.picker.font_size.0 as u32) as u16,
-							RenderedImage::Text(img) => img.rect().width,
+							RenderedImage::Data(data) => data.width,
+							RenderedImage::Image(img) => img.rect().width,
 						}
 					))
 				)
@@ -227,21 +227,16 @@ impl Tui {
 	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
 		match self.rendered[page_idx] {
 			Some(ref page_img) => {
-				let dyn_img = match page_img {
-					RenderedImage::Image(_) => {
-						// Couldn't think of a better way to do this. We need to `take` the
-						// image out so we can transform it into a RenderedImage::Text, but we
-						// don't want to `take` it out when it's already a `Text` or `None`...
-						// idk, maybe i'll think of something better later.
-						let Some(RenderedImage::Image(img)) = self.rendered[page_idx].take() else {
-							unreachable!();
-						};
+				let txt_img = match page_img {
+					RenderedImage::Data(img_data) => {
+						let dyn_img = image::load_from_memory_with_format(&img_data.data, ImageFormat::Png)
+							.expect("Cairo produced invalid png data; that really shouldn't happen");
 
 						// We don't actually want to Crop this image, but we've already
 						// verified (with the ImageSurface stuff) that the image is the correct
 						// size for the area given, so to save ratatui the work of having to
 						// resize it, we tell them to crop it to fit.
-						let dyn_img = match self.picker.new_protocol(img, img_area, Resize::Crop) {
+						let txt_img = match self.picker.new_protocol(dyn_img, img_area, Resize::Crop) {
 							Ok(img) => img,
 							Err(e) => {
 								self.error = Some(format!("Couldn't convert DynamicImage to ratatui image: {e}"));
@@ -249,17 +244,17 @@ impl Tui {
 							}
 						};
 
-						self.rendered[page_idx] = Some(RenderedImage::Text(dyn_img));
-						let Some(RenderedImage::Text(ref txt)) = self.rendered[page_idx] else {
+						self.rendered[page_idx] = Some(RenderedImage::Image(txt_img));
+						let Some(RenderedImage::Image(ref txt)) = self.rendered[page_idx] else {
 							unreachable!();
 						};
 
 						txt
 					}
-					RenderedImage::Text(ref img) => img,
+					RenderedImage::Image(ref img) => img,
 				};
 
-				frame.render_widget(Image::new(&**dyn_img), img_area);
+				frame.render_widget(Image::new(&**txt_img), img_area);
 			},
 			None => Self::render_loading_in(frame, img_area)
 		};
@@ -300,14 +295,13 @@ impl Tui {
 		// mark that we need to re-render the images
 	}
 
-	pub fn page_ready(&mut self, img: DynamicImage, page_num: usize) {
+	pub fn page_ready(&mut self, img: ImageData, page_num: usize) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
 		// the last rect marker so that all images are forced to redraw on next render and this one
 		// is drawn with them
-		let img_w = (img.width() / self.picker.font_size.0 as u32) as u16;
-		if img_w <= self.last_render.unused_width {
-			let num_fit = self.last_render.unused_width / img_w;
+		if img.width <= self.last_render.unused_width {
+			let num_fit = self.last_render.unused_width / img.width;
 			if page_num >= self.page && (self.page + num_fit as usize) >= page_num {
 				self.last_render.rect = Rect::default();
 			}
@@ -316,9 +310,7 @@ impl Tui {
 		// We always just set this here because we handle reloading in the `set_n_pages` function.
 		// If the document was reloaded, then It'll have the `set_n_pages` called to set the new
 		// number of pages, so the vec will already be cleared
-		self.rendered[page_num] = Some(RenderedImage::Image(img));
-
-		if page_num > 10 { panic!() }
+		self.rendered[page_num] = Some(RenderedImage::Data(img));
 	}
 
 	pub fn handle_event(&mut self, ev: Event) -> Option<InputAction> {

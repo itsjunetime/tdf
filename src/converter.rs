@@ -5,12 +5,12 @@ use image::ImageFormat;
 use itertools::Itertools;
 use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
 
-use crate::renderer::{ImageData, RenderError};
+use crate::renderer::{PageInfo, RenderError};
 
 const MAX_ITER: usize = 20;
 
 pub struct Converter {
-	images: Vec<Option<ImageData>>,
+	images: Vec<Option<PageInfo>>,
 	picker: Picker,
 	page: usize,
 	// once it reaches 20, we're done rendering images
@@ -27,8 +27,12 @@ impl Converter {
 		}
 	}
 
-	pub fn add_img(&mut self, image: ImageData, idx: usize) {
-		self.images[idx] = Some(image);
+	pub fn add_img(&mut self, page: PageInfo) {
+		let page_num = page.page;
+		self.images[page_num] = Some(page);
+		// just reset it to 0 so we grab this image again next time we try to get an image (if this
+		// image is in the current list of iterations, so to speak)
+		self.iteration = 0;
 	}
 
 	pub fn set_n_pages(&mut self, pages: usize) {
@@ -71,17 +75,17 @@ impl Converter {
 
 		// then we go through all the indices available to us and find the first one that has an
 		// image available to steal
-		let (img_data, iteration, new_idx) = (idx_start..self.page)
+		let (page_info, iteration) = (idx_start..self.page)
 			.interleave(self.page..idx_end)
 			.enumerate()
 			.skip(self.iteration)
 			.find_map(|(i_idx, p_idx)|
-				self.images[p_idx].take().map(|p| (p, i_idx, p_idx))
+				self.images[p_idx].take().map(|p| (p, i_idx))
 			)?;
 
-		let img_area = img_data.area;
+		let img_area = page_info.img_data.area;
 
-		let dyn_img = match image::load_from_memory_with_format(&img_data.data, ImageFormat::Png) {
+		let dyn_img = match image::load_from_memory_with_format(&page_info.img_data.data, ImageFormat::Png) {
 			Ok(dt) => dt,
 			Err(e) => return Some(Err(RenderError::Render(format!("Couldn't convert Vec<u8> to DynamicImage: {e}"))))
 		};
@@ -98,11 +102,21 @@ impl Converter {
 		// update the iteration to the iteration that we stole this image from
 		self.iteration = iteration;
 
-		Some(Ok((txt_img, new_idx)))
+		Some(Ok(ConvertedPage {
+			page: txt_img,
+			num: page_info.page,
+			num_results: page_info.search_results
+		}))
 	}
 }
 
-type ConversionResult = Result<(Box<dyn Protocol>, usize), RenderError>;
+pub struct ConvertedPage {
+	pub page: Box<dyn Protocol>,
+	pub num: usize,
+	pub num_results: usize
+}
+
+type ConversionResult = Result<ConvertedPage, RenderError>;
 
 impl Stream for Converter {
 	type Item = ConversionResult;

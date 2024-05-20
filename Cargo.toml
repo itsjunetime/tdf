@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-poppler-rs = { version = "0.23.0" }
+poppler-rs = { version = "0.23.0", features = ["v21_5"] }
 cairo-rs = { version = "0.19.4", features = ["png"] }
-# ratatui = "0.26.2"
-ratatui = { path = "./ratatui" }
-# ratatui-image = { version = "1.0.0", features = ["rustix"], default-features = false }
-ratatui-image = { path = "./ratatui-image", features = ["rustix"], default-features = false }
+ratatui = "0.26.2"
+# ratatui = { path = "./ratatui" }
+ratatui-image = { version = "1.0.0", features = ["rustix"], default-features = false }
+# ratatui-image = { path = "./ratatui-image", features = ["rustix"], default-features = false }
 crossterm = { version = "0.27.0", features = ["event-stream"] }
 image = { version = "0.24.9", features = ["png", "rayon"], default-features = false }
 notify = "6.1.1"

@@ -1,6 +1,8 @@
+#![feature(if_let_guard)]
+
 use std::{io::stdout, path::PathBuf, str::FromStr};
 
-use converter::Converter;
+use converter::{Converter, ConvertedPage};
 use crossterm::{execute, terminal::{disable_raw_mode, enable_raw_mode, EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen}};
 use glib::{LogField, LogLevel, LogWriterOutput};
 use notify::{RecursiveMode, Watcher};
@@ -18,7 +20,7 @@ mod skip;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut args = std::env::args().skip(1);
-	let file = args.next().expect("Program requires a file to process");
+	let file = args.next().ok_or("Program requires a file to process")?;
 	let path = PathBuf::from_str(&file)?.canonicalize()?;
 
 	let (watch_tx, render_rx) = tokio::sync::mpsc::channel(1);
@@ -80,54 +82,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	tui_tx.send(RenderNotif::Area(main_area[1])).await?;
 
 	loop {
-		let mut needs_redraw;
-
-		tokio::select! {
+		let mut needs_redraw = tokio::select! {
 			Some(img_res) = converter.next() => {
 				match img_res {
-					Ok((img, page)) => tui.page_ready(img, page),
+					Ok(ConvertedPage { page, num, num_results }) => tui.page_ready(page, num, num_results),
 					Err(e) => tui.show_error(e),
 				}
-				needs_redraw = true;
+				true
 			},
 			// First we check if we have any keystrokes
 			Some(ev) = ev_stream.next() => {
 				// If we can't get user input, just crash.
 				let ev = ev.expect("Couldn't get any user input");
 
-				needs_redraw = match tui.handle_event(ev) {
+				match tui.handle_event(ev) {
 					None => false,
-					Some(InputAction::Redraw) => true,
-					Some(InputAction::QuitApp) => break,
-					Some(InputAction::ChangePageBy(change)) => {
-						converter.change_page_by(change);
-						true
-					},
-					Some(InputAction::JumpingToPage(page)) => {
-						tui_tx.send(RenderNotif::JumpToPage(page)).await?;
-						converter.go_to_page(page);
+					Some(action) => {
+						match action {
+							InputAction::Redraw => (),
+							InputAction::QuitApp => break,
+							InputAction::ChangePageBy(change) => converter.change_page_by(change),
+							InputAction::JumpingToPage(page) => {
+								tui_tx.send(RenderNotif::JumpToPage(page)).await?;
+								converter.go_to_page(page);
+							},
+							InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term)).await?,
+						};
 						true
 					}
-				};
+				}
 			},
 			Some(renderer_msg) = tui_rx.recv() => {
-				needs_redraw = match renderer_msg {
+				match renderer_msg {
 					Ok(RenderInfo::NumPages(num)) => {
 						tui.set_n_pages(num);
 						converter.set_n_pages(num);
 						true
 					},
-					Ok(RenderInfo::Page(img, page_num)) => {
-						converter.add_img(img, page_num);
+					Ok(RenderInfo::Page(info)) => {
+						converter.add_img(info);
 						false
 					},
 					Err(e) => {
 						tui.show_error(e);
 						true
 					}
-				};
+				}
 			}
-		}
+		};
 
 		let new_area = Tui::main_layout(&term.get_frame());
 		if new_area != main_area {
@@ -140,6 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			let mut end_update = false;
 			term.draw(|f| {
 				tui.render(f, &main_area, &mut end_update);
+				// To be enabled when https://github.com/ratatui-org/ratatui/issues/1116 gets fixed
 				// f.bypass_diff = true;
 			})?;
 			if end_update {

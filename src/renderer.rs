@@ -1,12 +1,13 @@
 use cairo::{Antialias, Format};
 use itertools::Itertools;
-use poppler::{Document, Page};
+use poppler::{Color, Document, FindFlags, Page, SelectionStyle, Rectangle};
 use ratatui::layout::Rect;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender};
 
 pub enum RenderNotif {
 	Area(Rect),
 	JumpToPage(usize),
+	Search(String),
 	Reload
 }
 
@@ -20,7 +21,13 @@ pub enum RenderError {
 
 pub enum RenderInfo {
 	NumPages(usize),
-	Page(ImageData, usize)
+	Page(PageInfo),
+}
+
+pub struct PageInfo {
+	pub img_data: ImageData,
+	pub page: usize,
+	pub search_results: usize
 }
 
 pub struct ImageData {
@@ -71,6 +78,7 @@ pub fn start_rendering(
 		// then we can split at that page and render at both sides of it
 		let mut rendered = vec![false; n_pages];
 		let mut start_point = 0;
+		let mut search_term = None;
 
 		// This is kinda a weird way of doing this, but if we get a notification that the area
 		// changed, we want to start re-rending all of the pages, but we don't want to reload the
@@ -97,6 +105,11 @@ pub fn start_rendering(
 						},
 						RenderNotif::JumpToPage(page) => {
 							start_point = page;
+							continue 'render_pages;
+						},
+						RenderNotif::Search(term) => {
+							rendered = vec![false; n_pages];
+							search_term = Some(term);
 							continue 'render_pages;
 						}
 					}
@@ -131,8 +144,8 @@ pub fn start_rendering(
 				let page = doc.page(num as i32).unwrap();
 
 				// render the page
-				let to_send = render_single_page(page, area)
-					.map(|data| RenderInfo::Page(data, num))
+				let to_send = render_single_page(page, area, num, &search_term)
+					.map(RenderInfo::Page)
 					.map_err(RenderError::Render);
 
 				// then send it over
@@ -157,7 +170,9 @@ pub fn start_rendering(
 fn render_single_page(
 	page: Page,
 	area: Rect,
-) -> Result<ImageData, String> {
+	page_num: usize,
+	search_term: &Option<String>
+) -> Result<PageInfo, String> {
 	// First, get the font size; the number of pixels (width x height) per font character (I
 	// think; it's at least something like that) on this terminal screen.
 	let size = crossterm::terminal::window_size()
@@ -214,21 +229,57 @@ fn render_single_page(
 	// The default background color of PDFs (at least, I think) is white, so we need to set
 	// that as the background color, then paint, then render.
 	ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
+
 	ctx.set_antialias(Antialias::Best);
 	ctx.paint().map_err(|e| format!("Couldn't paint Context: {e}"))?;
-	page.render_for_printing(&ctx);
+	page.render(&ctx);
+
+	let mut result_rects = search_term
+		.as_ref()
+		.map(|term| page.find_text_with_options(term, FindFlags::DEFAULT | FindFlags::MULTILINE))
+		.unwrap_or_default();
+
+	let num_results = result_rects.iter()
+		.filter(|rect| !rect.find_get_match_continued())
+		.count();
+
+	let mut highlight_color = Color::new();
+	highlight_color.set_red((u16::MAX / 5) * 4);
+	highlight_color.set_green((u16::MAX / 5) * 4);
+
+	let mut old_rect = Rectangle::new();
+	for rect in result_rects.iter_mut() {
+		// According to https://gitlab.freedesktop.org/poppler/poppler/-/issues/763, these rects
+		// need to be corrected since they use different references as the y-coordinate base
+		rect.set_y1(p_height - rect.y1());
+		rect.set_y2(p_height - rect.y2());
+
+		page.render_selection(
+			&ctx,
+			rect,
+			&mut old_rect,
+			SelectionStyle::Glyph,
+			&mut Color::new(),
+			&mut highlight_color
+		);
+	}
+
 	ctx.scale(1. / scale_factor, 1. / scale_factor);
 
 	let mut img_data = Vec::new();
 	ctx.target().write_to_png(&mut img_data)
 		.map_err(|e| format!("Couldn't write surface to png: {e}"))?;
 
-	Ok(ImageData {
-		data: img_data,
-		area: Rect {
-			width: surface_width as u16 / col_w,
-			height: surface_height as u16 / col_h,
-			..Rect::default()
-		}
+	Ok(PageInfo {
+		img_data: ImageData {
+			data: img_data,
+			area: Rect {
+				width: surface_width as u16 / col_w,
+				height: surface_height as u16 / col_h,
+				..Rect::default()
+			}
+		},
+		page: page_num,
+		search_results: num_results
 	})
 }

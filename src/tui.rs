@@ -12,7 +12,7 @@ pub struct Tui {
 	error: Option<String>,
 	input_state: Option<InputCommand>,
 	last_render: LastRender,
-	rendered: Vec<Option<Box<dyn Protocol>>>,
+	rendered: Vec<Option<RenderedInfo>>,
 }
 
 #[derive(Default, Debug)]
@@ -25,7 +25,13 @@ struct LastRender {
 }
 
 enum InputCommand {
-	GoToPage(usize)
+	GoToPage(usize),
+	Search(String)
+}
+
+struct RenderedInfo {
+	img: Box<dyn Protocol>,
+	num_results: usize
 }
 
 impl Tui {
@@ -98,15 +104,19 @@ impl Tui {
 
 		frame.render_widget(bottom_block, main_area[2]);
 
-		let rendered_str = format!(
-			"Rendered: {}%",
-			(self.rendered.iter().filter(|i| i.is_some()).count() * 100) / self.rendered.len()
-		);
-
+		let rendered_str = if !self.rendered.is_empty() {
+			format!(
+				"Rendered: {}%",
+				(self.rendered.iter().filter(|i| i.is_some()).count() * 100) / self.rendered.len()
+			)
+		} else {
+			String::new()
+		};
 		let bottom_layout = Layout::horizontal([
 			Constraint::Fill(1),
 			Constraint::Length(rendered_str.len() as u16)
 		]).split(bottom_area);
+
 
 		let rendered_span = Span::styled(
 			&rendered_str,
@@ -123,16 +133,13 @@ impl Tui {
 			);
 			frame.render_widget(span, bottom_layout[0]);
 		} else if let Some(ref cmd) = self.input_state {
-			match cmd {
-				InputCommand::GoToPage(page) => {
-					let span = Span::styled(
-						format!("Go to: {page}"),
-						Style::new()
-							.fg(Color::Blue)
-					);
-					frame.render_widget(span, bottom_layout[0]);
-				}
-			}
+			let cmd_str = match cmd {
+				InputCommand::GoToPage(page) => format!("Go to: {page}"),
+				InputCommand::Search(s) => format!("Search: {s}"),
+			};
+
+			let span = Span::styled(cmd_str, Style::new().fg(Color::Blue));
+			frame.render_widget(span, bottom_layout[0]);
 		}
 
 		let mut img_area = main_area[1];
@@ -158,7 +165,7 @@ impl Tui {
 				.flat_map(|(idx, page)|
 					page.as_ref().map(|img| (
 						idx,
-						img.rect().width,
+						img.img.rect().width,
 					))
 				)
 				// and then take them as long as they won't overflow the available area.
@@ -211,7 +218,7 @@ impl Tui {
 
 	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
 		match self.rendered[page_idx] {
-			Some(ref page_img) => frame.render_widget(Image::new(&**page_img), img_area),
+			Some(ref page_img) => frame.render_widget(Image::new(&*page_img.img), img_area),
 			None => Self::render_loading_in(frame, img_area)
 		};
 	}
@@ -254,12 +261,12 @@ impl Tui {
 		self.page = self.page.min(n_pages - 1);
 	}
 
-	pub fn page_ready(&mut self, img: Box<dyn Protocol>, page_num: usize) {
+	pub fn page_ready(&mut self, img: Box<dyn Protocol>, page_num: usize, num_results: usize) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
 		// the last rect marker so that all images are forced to redraw on next render and this one
 		// is drawn with them
-		if page_num == self.page {
+		if page_num >= self.page && page_num <= self.page + self.last_render.pages_shown {
 			self.last_render.rect = Rect::default();
 		} else {
 			let img_w = img.rect().width;
@@ -274,32 +281,54 @@ impl Tui {
 		// We always just set this here because we handle reloading in the `set_n_pages` function.
 		// If the document was reloaded, then It'll have the `set_n_pages` called to set the new
 		// number of pages, so the vec will already be cleared
-		self.rendered[page_num] = Some(img);
+		self.rendered[page_num] = Some(RenderedInfo { img, num_results })
 	}
 
 	pub fn handle_event(&mut self, ev: Event) -> Option<InputAction> {
 		match ev {
 			Event::Key(key) => {
 				match key.code {
-					KeyCode::Right | KeyCode::Char('l') => self.change_page(PageChange::Next, ChangeAmount::Single),
-					KeyCode::Down | KeyCode::Char('j') => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
-					KeyCode::Left | KeyCode::Char('h') => self.change_page(PageChange::Prev, ChangeAmount::Single),
-					KeyCode::Up | KeyCode::Char('k') => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-					KeyCode::Esc | KeyCode::Char('q') => Some(InputAction::QuitApp),
-					KeyCode::Char('g') => {
-						self.input_state = Some(InputCommand::GoToPage(0));
+					KeyCode::Char(c) if let Some(InputCommand::Search(ref mut term)) = self.input_state => {
+						term.push(c);
 						Some(InputAction::Redraw)
 					},
-					KeyCode::Char(c) => {
-						let Some(InputCommand::GoToPage(ref mut page)) = self.input_state else {
-							return None;
-						};
-
+					KeyCode::Char(c) if let Some(InputCommand::GoToPage(ref mut page)) = self.input_state => {
 						c.to_digit(10)
 							.map(|input_num| {
 								*page = (*page * 10) + input_num as usize;
 								InputAction::Redraw
 							})
+					},
+					KeyCode::Right | KeyCode::Char('l') => self.change_page(PageChange::Next, ChangeAmount::Single),
+					KeyCode::Down | KeyCode::Char('j') => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
+					KeyCode::Left | KeyCode::Char('h') => self.change_page(PageChange::Prev, ChangeAmount::Single),
+					KeyCode::Up | KeyCode::Char('k') => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
+					KeyCode::Esc | KeyCode::Char('q') => {
+						if self.input_state.is_some() {
+							self.input_state = None;
+							Some(InputAction::Redraw)
+						} else {
+							Some(InputAction::QuitApp)
+						}
+					},
+					KeyCode::Char('g') => {
+						self.input_state = Some(InputCommand::GoToPage(0));
+						Some(InputAction::Redraw)
+					},
+					KeyCode::Char('/') => {
+						self.input_state = Some(InputCommand::Search(String::new()));
+						Some(InputAction::Redraw)
+					},
+					KeyCode::Char('n') => {
+						let next_page = self.rendered[self.page..]
+							.iter()
+							.enumerate()
+							.filter_map(|(idx, p)| p.as_ref().map(|p| (idx, p)))
+							.find_map(|(idx, p)| (p.num_results > 0).then_some(idx));
+						if let Some(page) = next_page {
+							self.page = page;
+						}
+						next_page.map(|_| InputAction::Redraw)
 					},
 					KeyCode::Enter => self.input_state.take()
 						.and_then(|cmd| match cmd {
@@ -307,7 +336,8 @@ impl Tui {
 							InputCommand::GoToPage(page) => (page < self.rendered.len()).then(|| {
 								self.set_page(page);
 								InputAction::JumpingToPage(page)
-							})
+							}),
+							InputCommand::Search(term) => Some(InputAction::Search(term)),
 						}),
 					_ => None,
 				}
@@ -346,6 +376,7 @@ pub enum InputAction {
 	Redraw,
 	ChangePageBy(isize),
 	JumpingToPage(usize),
+	Search(String),
 	QuitApp
 }
 

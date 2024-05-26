@@ -1021,7 +1021,7 @@ dependencies = [
 [[package]]
 name = "ratatui-image"
 version = "1.0.0"
-source = "git+https://github.com/itsjunetime/ratatui-image.git?branch=vb64_on_personal#5ae2012631c0ca273deeab8f6444e9c2f0edaf51"
+source = "git+https://github.com/itsjunetime/ratatui-image.git?branch=vb64_on_personal#e5c13ed29c9decdff093c2be5d673d84fb3589a9"
 dependencies = [
  "base64",
  "dyn-clone",

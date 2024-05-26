@@ -1,0 +1,7 @@
+hard_tabs = true
+match_arm_blocks = false
+imports_granularity = "Crate"
+overflow_delimited_expr = true
+group_imports = "StdExternalCrate"
+trailing_comma = "Never"
+use_field_init_shorthand = true

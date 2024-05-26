@@ -2,20 +2,26 @@
 
 use std::{io::stdout, path::PathBuf, str::FromStr};
 
-use converter::{Converter, ConvertedPage};
-use crossterm::{execute, terminal::{disable_raw_mode, enable_raw_mode, EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen}};
+use converter::{ConvertedPage, Converter};
+use crossterm::{
+	execute,
+	terminal::{
+		disable_raw_mode, enable_raw_mode, EndSynchronizedUpdate, EnterAlternateScreen,
+		LeaveAlternateScreen
+	}
+};
+use futures_util::stream::StreamExt;
 use glib::{LogField, LogLevel, LogWriterOutput};
 use notify::{RecursiveMode, Watcher};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
-use tui::{InputAction, Tui};
-use futures_util::stream::StreamExt;
 use renderer::{RenderInfo, RenderNotif};
+use tui::{InputAction, Tui};
 
-mod tui;
-mod renderer;
 mod converter;
+mod renderer;
 mod skip;
+mod tui;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,7 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		// This shouldn't fail to send unless the receiver gets disconnected. If that's happened,
 		// then like the main thread has panicked or something, so it doesn't matter if this panics
 		// as well
-		watch_tx.blocking_send(renderer::RenderNotif::Reload).unwrap();
+		watch_tx
+			.blocking_send(renderer::RenderNotif::Reload)
+			.unwrap();
 	})?;
 
 	// We're making this nonrecursive 'cause we're just watching a single file, so there's nothing
@@ -51,11 +59,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// then we want to spawn off the rendering task
 	// We need to use the thread::spawn API so that this exists in a thread not owned by tokio,
 	// since the methods we call in `start_rendering` will panic if called in an async context
-	std::thread::spawn(move || { renderer::start_rendering(file_path, render_tx, render_rx) });
+	std::thread::spawn(move || renderer::start_rendering(file_path, render_tx, render_rx));
 
 	let mut ev_stream = crossterm::event::EventStream::new();
 
-	let file_name = path.file_name()
+	let file_name = path
+		.file_name()
 		.map(|n| n.to_string_lossy())
 		.unwrap_or_else(|| "Unknown file".into())
 		.to_string();

@@ -1,6 +1,6 @@
 use cairo::{Antialias, Format};
 use itertools::Itertools;
-use poppler::{Color, Document, FindFlags, Page, SelectionStyle, Rectangle};
+use poppler::{Color, Document, FindFlags, Page, Rectangle, SelectionStyle};
 use ratatui::layout::Rect;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender};
 
@@ -21,7 +21,7 @@ pub enum RenderError {
 
 pub enum RenderInfo {
 	NumPages(usize),
-	Page(PageInfo),
+	Page(PageInfo)
 }
 
 pub struct PageInfo {
@@ -71,7 +71,7 @@ pub fn start_rendering(
 			area = r;
 			break;
 		}
-	};
+	}
 
 	// We want this outside of 'reload so that if the doc reloads, the search term that somebody
 	// set will still get highlighted in the reloaded doc
@@ -82,12 +82,14 @@ pub fn start_rendering(
 			Err(e) => {
 				sender.blocking_send(Err(RenderError::Doc(e))).unwrap();
 				return;
-			},
+			}
 			Ok(d) => d
 		};
 
 		let n_pages = doc.n_pages() as usize;
-		sender.blocking_send(Ok(RenderInfo::NumPages(n_pages))).unwrap();
+		sender
+			.blocking_send(Ok(RenderInfo::NumPages(n_pages)))
+			.unwrap();
 
 		// We're using this vec of bools to indicate which page numbers have already been rendered,
 		// to support people jumping to specific pages and having quick rendering results. We
@@ -110,7 +112,8 @@ pub fn start_rendering(
 					match $notif {
 						RenderNotif::Reload => continue 'reload,
 						RenderNotif::Area(new_area) => {
-							let bigger = new_area.width > area.width || new_area.height > area.height;
+							let bigger =
+								new_area.width > area.width || new_area.height > area.height;
 							area = new_area;
 							// we only want to re-render pages if the new area is greater than the old
 							// one, 'cause then we might need sharper images to make it all look good.
@@ -120,11 +123,11 @@ pub fn start_rendering(
 								fill_default(&mut rendered, n_pages);
 								continue 'render_pages;
 							}
-						},
+						}
 						RenderNotif::JumpToPage(page) => {
 							start_point = page;
 							continue 'render_pages;
-						},
+						}
 						RenderNotif::Search(term) => {
 							if term.is_empty() {
 								// If the term is set to nothing, then we don't need to re-render
@@ -149,12 +152,13 @@ pub fn start_rendering(
 							continue 'render_pages;
 						}
 					}
-				}
+				};
 			}
 
 			let (left, right) = rendered.split_at_mut(start_point);
 
-			let page_iter = right.iter_mut()
+			let page_iter = right
+				.iter_mut()
 				.enumerate()
 				.map(|(idx, p)| (idx + start_point, p))
 				.interleave(
@@ -185,14 +189,17 @@ pub fn start_rendering(
 
 				// We know this is in range 'cause we're iterating over it
 				let Some(page) = doc.page(num as i32) else {
-					sender.blocking_send(
-							Err(RenderError::Render(format!("Couldn't get page {num} ({}) of doc?", num as i32)))
-						)
+					sender
+						.blocking_send(Err(RenderError::Render(format!(
+							"Couldn't get page {num} ({}) of doc?",
+							num as i32
+						))))
 						.unwrap();
 					continue;
 				};
 
-				let rendered_with_no_results = rendered.successful && rendered.contained_term == Some(false);
+				let rendered_with_no_results =
+					rendered.successful && rendered.contained_term == Some(false);
 
 				// render the page
 				match render_single_page(page, area, num, &search_term, rendered_with_no_results) {
@@ -205,14 +212,14 @@ pub fn start_rendering(
 					// And if we got an error, then obviously we need to propagate that
 					Err(e) => sender.blocking_send(Err(RenderError::Render(e))).unwrap()
 				}
-			};
+			}
 			// Then once we've rendered all these pages, wait until we get another notification
 			// that this doc needs to be reloaded
 			loop {
 				// This once returned None despite the main thing being still connected (I think, at
 				// last), so I'm just being safe here
 				let Some(msg) = receiver.blocking_recv() else {
-					return
+					return;
 				};
 				handle_notif!(msg);
 			}
@@ -235,13 +242,13 @@ fn render_single_page(
 	// If there are no search terms on this page, and we've already rendered it with no search
 	// terms, then just return none to avoid this computation
 	if result_rects.is_empty() && already_rendered_no_results {
-		return Ok(None)
+		return Ok(None);
 	}
 
 	// First, get the font size; the number of pixels (width x height) per font character (I
 	// think; it's at least something like that) on this terminal screen.
-	let size = crossterm::terminal::window_size()
-		.map_err(|e| format!("Couldn't get window size: {e}"))?;
+	let size =
+		crossterm::terminal::window_size().map_err(|e| format!("Couldn't get window size: {e}"))?;
 	let col_h = size.height / size.rows;
 	let col_w = size.width / size.columns;
 
@@ -285,9 +292,9 @@ fn render_single_page(
 		// rendered at higher quality.
 		surface_width as i32,
 		surface_height as i32
-	).map_err(|e| format!("Couldn't create ImageSurface: {e}"))?;
-	let ctx = cairo::Context::new(surface)
-		.map_err(|e| format!("Couldn't create Context: {e}"))?;
+	)
+	.map_err(|e| format!("Couldn't create ImageSurface: {e}"))?;
+	let ctx = cairo::Context::new(surface).map_err(|e| format!("Couldn't create Context: {e}"))?;
 
 	ctx.scale(scale_factor, scale_factor);
 
@@ -296,7 +303,8 @@ fn render_single_page(
 	ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
 
 	ctx.set_antialias(Antialias::Best);
-	ctx.paint().map_err(|e| format!("Couldn't paint Context: {e}"))?;
+	ctx.paint()
+		.map_err(|e| format!("Couldn't paint Context: {e}"))?;
 	page.render(&ctx);
 
 	let num_results = result_rects.len();
@@ -325,7 +333,8 @@ fn render_single_page(
 	ctx.scale(1. / scale_factor, 1. / scale_factor);
 
 	let mut img_data = Vec::new();
-	ctx.target().write_to_png(&mut img_data)
+	ctx.target()
+		.write_to_png(&mut img_data)
 		.map_err(|e| format!("Couldn't write surface to png: {e}"))?;
 
 	Ok(Some(PageInfo {

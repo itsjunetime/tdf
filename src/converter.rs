@@ -1,4 +1,7 @@
-use std::{pin::Pin, task::{Context, Poll}};
+use std::{
+	pin::Pin,
+	task::{Context, Poll}
+};
 
 use futures_util::Stream;
 use image::ImageFormat;
@@ -79,16 +82,18 @@ impl Converter {
 			.interleave(self.page..idx_end)
 			.enumerate()
 			.skip(self.iteration)
-			.find_map(|(i_idx, p_idx)|
-				self.images[p_idx].take().map(|p| (p, i_idx))
-			)?;
+			.find_map(|(i_idx, p_idx)| self.images[p_idx].take().map(|p| (p, i_idx)))?;
 
 		let img_area = page_info.img_data.area;
 
-		let dyn_img = match image::load_from_memory_with_format(&page_info.img_data.data, ImageFormat::Png) {
-			Ok(dt) => dt,
-			Err(e) => return Some(Err(RenderError::Render(format!("Couldn't convert Vec<u8> to DynamicImage: {e}"))))
-		};
+		let dyn_img =
+			match image::load_from_memory_with_format(&page_info.img_data.data, ImageFormat::Png) {
+				Ok(dt) => dt,
+				Err(e) =>
+					return Some(Err(RenderError::Render(format!(
+						"Couldn't convert Vec<u8> to DynamicImage: {e}"
+					)))),
+			};
 
 		// We don't actually want to Crop this image, but we've already
 		// verified (with the ImageSurface stuff) that the image is the correct
@@ -96,7 +101,10 @@ impl Converter {
 		// resize it, we tell them to crop it to fit.
 		let txt_img = match self.picker.new_protocol(dyn_img, img_area, Resize::Crop) {
 			Ok(img) => img,
-			Err(e) => return Some(Err(RenderError::Render(format!("Couldn't convert DynamicImage to ratatui image: {e}"))))
+			Err(e) =>
+				return Some(Err(RenderError::Render(format!(
+					"Couldn't convert DynamicImage to ratatui image: {e}"
+				)))),
 		};
 
 		// update the iteration to the iteration that we stole this image from

@@ -11,6 +11,8 @@ pub struct Tui {
 	page: usize,
 	last_render: LastRender,
 	bottom_msg: BottomMessage,
+	// we use `prev_msg` to, for example, restore the 'search results' message on the bottom after
+	// jumping to a specific page
 	prev_msg: Option<BottomMessage>,
 	rendered: Vec<RenderedInfo>,
 }
@@ -320,6 +322,15 @@ impl Tui {
 	}
 
 	pub fn handle_event(&mut self, ev: Event) -> Option<InputAction> {
+		fn jump_to_page(page: &mut usize, rect: &mut Rect, new_page: Option<usize>) -> Option<InputAction> {
+			new_page.map(|new_page| {
+				*page = new_page;
+				// Make sure we re-render
+				*rect = Rect::default();
+				InputAction::JumpingToPage(new_page)
+			})
+		}
+
 		match ev {
 			Event::Key(key) => {
 				match key.code {
@@ -357,16 +368,21 @@ impl Tui {
 								.is_some_and(|num| num > 0)
 								.then_some(self.page + 1 + idx)
 							);
-						if let Some(page) = next_page {
-							self.page = page;
-							// Make sure we re-render
-							self.last_render.rect = Rect::default();
-							Some(InputAction::JumpingToPage(page))
-						} else {
-							None
-						}
+
+						jump_to_page(&mut self.page, &mut self.last_render.rect, next_page)
 					},
-					// TODO: Add 'N' key to go back a search page
+					KeyCode::Char('N') if self.page > 0 => {
+						let prev_page = self.rendered[..(self.page)]
+							.iter()
+							.rev()
+							.enumerate()
+							.find_map(|(idx, p)| p.num_results
+								.is_some_and(|num| num > 0)
+								.then_some(self.page - (idx + 1))
+							);
+
+						jump_to_page(&mut self.page, &mut self.last_render.rect, prev_page)
+					},
 					KeyCode::Enter => {
 						let BottomMessage::Input(_) = self.bottom_msg else {
 							return None;

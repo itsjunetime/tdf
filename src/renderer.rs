@@ -35,6 +35,20 @@ pub struct ImageData {
 	pub area: Rect
 }
 
+#[derive(Default)]
+struct PrevRender {
+	successful: bool,
+	contained_term: Option<bool>
+}
+
+fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
+	vec.clear();
+	vec.reserve(size.saturating_sub(vec.len()));
+	for _ in 0..size {
+		vec.push(T::default());
+	}
+}
+
 // this function has to be sync (non-async) because the poppler::Document needs to be held during
 // most of it, but that's basically just a wrapper around `*c_void` cause it's just a binding to C
 // code, so it's !Send and thus can't be held across await points. So we can't call any of the
@@ -80,7 +94,8 @@ pub fn start_rendering(
 		// `split_at_mut` at 0 initially (which bascially makes `right == rendered && left == []`),
 		// doing basically nothing, but if we get a notification that something has been jumped to,
 		// then we can split at that page and render at both sides of it
-		let mut rendered = vec![false; n_pages];
+		let mut rendered = vec![];
+		fill_default::<PrevRender>(&mut rendered, n_pages);
 		let mut start_point = 0;
 
 		// This is kinda a weird way of doing this, but if we get a notification that the area
@@ -102,7 +117,7 @@ pub fn start_rendering(
 							// If the new area is smaller, then the same high-quality-rendered images
 							// will still look fine, so it's ok to leave it.
 							if bigger {
-								rendered = vec![false; n_pages];
+								fill_default(&mut rendered, n_pages);
 								continue 'render_pages;
 							}
 						},
@@ -111,10 +126,24 @@ pub fn start_rendering(
 							continue 'render_pages;
 						},
 						RenderNotif::Search(term) => {
-							rendered = vec![false; n_pages];
 							if term.is_empty() {
+								// If the term is set to nothing, then we don't need to re-render
+								// the pages wherein there were already no search results. So this
+								// is a little optimization to allow that.
+								for page in &mut rendered {
+									if !page.successful || page.contained_term != Some(true) {
+										page.successful = false;
+									}
+								}
 								search_term = None;
 							} else {
+								// But if the term is set to something new, we need to reset all of
+								// the 'contained_term' fields so that if they now contain the
+								// term, we can render them with the term, but if they don't, we
+								// don't need to re-render and send it over again.
+								for page in &mut rendered {
+									page.contained_term = None;
+								}
 								search_term = Some(term);
 							}
 							continue 'render_pages;
@@ -135,8 +164,14 @@ pub fn start_rendering(
 						.map(|(idx, p)| (start_point - (idx + 1), p))
 				);
 
+			// we go through each page
 			for (num, rendered) in page_iter {
-				if *rendered {
+				// we only want to continue if one of the following is met:
+				// 1. It failed to render last time (we want to retry)
+				// 2. The `contained_term` is set to None (representing 'Unknown'), meaning that we
+				//    need to at least check if it contains the current term to see if it needs a
+				//    re-render
+				if rendered.successful && rendered.contained_term.is_some() {
 					continue;
 				}
 
@@ -150,20 +185,26 @@ pub fn start_rendering(
 
 				// We know this is in range 'cause we're iterating over it
 				let Some(page) = doc.page(num as i32) else {
-					sender.blocking_send(Err(RenderError::Render(format!("Couldn't get page {num} ({}) of doc??", num as i32))))
+					sender.blocking_send(
+							Err(RenderError::Render(format!("Couldn't get page {num} ({}) of doc?", num as i32)))
+						)
 						.unwrap();
 					continue;
 				};
 
+				let rendered_with_no_results = rendered.successful && rendered.contained_term == Some(false);
+
 				// render the page
-				let to_send = render_single_page(page, area, num, &search_term)
-					.map(RenderInfo::Page)
-					.map_err(RenderError::Render);
-
-				// then send it over
-				sender.blocking_send(to_send).unwrap();
-
-				*rendered = true;
+				match render_single_page(page, area, num, &search_term, rendered_with_no_results) {
+					// If we've already rendered it just fine and we don't need to render it again,
+					// just continue. We're all good
+					Ok(None) => (),
+					// If that fn returned Some, that means it needed to be re-rendered for some
+					// reason or another, so we're sending it here
+					Ok(Some(img)) => sender.blocking_send(Ok(RenderInfo::Page(img))).unwrap(),
+					// And if we got an error, then obviously we need to propagate that
+					Err(e) => sender.blocking_send(Err(RenderError::Render(e))).unwrap()
+				}
 			};
 			// Then once we've rendered all these pages, wait until we get another notification
 			// that this doc needs to be reloaded
@@ -183,8 +224,20 @@ fn render_single_page(
 	page: Page,
 	area: Rect,
 	page_num: usize,
-	search_term: &Option<String>
-) -> Result<PageInfo, String> {
+	search_term: &Option<String>,
+	already_rendered_no_results: bool
+) -> Result<Option<PageInfo>, String> {
+	let mut result_rects = search_term
+		.as_ref()
+		.map(|term| page.find_text_with_options(term, FindFlags::DEFAULT | FindFlags::MULTILINE))
+		.unwrap_or_default();
+
+	// If there are no search terms on this page, and we've already rendered it with no search
+	// terms, then just return none to avoid this computation
+	if result_rects.is_empty() && already_rendered_no_results {
+		return Ok(None)
+	}
+
 	// First, get the font size; the number of pixels (width x height) per font character (I
 	// think; it's at least something like that) on this terminal screen.
 	let size = crossterm::terminal::window_size()
@@ -246,11 +299,6 @@ fn render_single_page(
 	ctx.paint().map_err(|e| format!("Couldn't paint Context: {e}"))?;
 	page.render(&ctx);
 
-	let mut result_rects = search_term
-		.as_ref()
-		.map(|term| page.find_text_with_options(term, FindFlags::DEFAULT | FindFlags::MULTILINE))
-		.unwrap_or_default();
-
 	let num_results = result_rects.len();
 
 	let mut highlight_color = Color::new();
@@ -280,9 +328,7 @@ fn render_single_page(
 	ctx.target().write_to_png(&mut img_data)
 		.map_err(|e| format!("Couldn't write surface to png: {e}"))?;
 
-	// TODO: Maybe cache which pages had no results with the last search term so we don't have to
-	// rerender them when the search term is set to empty and rerenders are requested
-	Ok(PageInfo {
+	Ok(Some(PageInfo {
 		img_data: ImageData {
 			data: img_data,
 			area: Rect {
@@ -293,5 +339,5 @@ fn render_single_page(
 		},
 		page: page_num,
 		search_results: num_results
-	})
+	}))
 }

@@ -349,7 +349,14 @@ impl Tui {
 					KeyCode::Down | KeyCode::Char('j') => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
 					KeyCode::Left | KeyCode::Char('h') => self.change_page(PageChange::Prev, ChangeAmount::Single),
 					KeyCode::Up | KeyCode::Char('k') => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-					KeyCode::Esc | KeyCode::Char('q') => Some(InputAction::QuitApp),
+					KeyCode::Esc => match self.bottom_msg {
+						BottomMessage::Input(_) => {
+							self.set_bottom_msg(None);
+							Some(InputAction::Redraw)
+						},
+						_ => Some(InputAction::QuitApp)
+					},
+					KeyCode::Char('q') => Some(InputAction::QuitApp),
 					KeyCode::Char('g') => {
 						self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::GoToPage(0))));
 						Some(InputAction::Redraw)
@@ -412,6 +419,11 @@ impl Tui {
 								// data to show
 								if !term.is_empty() {
 									self.set_bottom_msg(Some(BottomMessage::SearchResults(term.clone())));
+								} else {
+									// else, if it's not empty, we just want to reset the bottom
+									// area to show the default data; we don't want it to like show
+									// the data from a previous search
+									self.set_bottom_msg(Some(BottomMessage::Help));
 								}
 
 								// Reset all the search results

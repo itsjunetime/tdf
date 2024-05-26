@@ -1002,6 +1002,7 @@ dependencies = [
 [[package]]
 name = "ratatui"
 version = "0.26.3"
+source = "git+https://github.com/itsjunetime/ratatui.git#0e185042b728b3bc8baff245154e6d200bb64f3b"
 dependencies = [
  "bitflags 2.5.0",
  "cassowary",
@@ -1020,6 +1021,7 @@ dependencies = [
 [[package]]
 name = "ratatui-image"
 version = "1.0.0"
+source = "git+https://github.com/itsjunetime/ratatui-image.git?branch=vb64_on_personal#5ae2012631c0ca273deeab8f6444e9c2f0edaf51"
 dependencies = [
  "base64",
  "dyn-clone",
@@ -1028,6 +1030,7 @@ dependencies = [
  "rand",
  "ratatui",
  "rustix",
+ "vb64",
 ]
 
 [[package]]
@@ -1448,6 +1451,11 @@ name = "utf8parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
+
+[[package]]
+name = "vb64"
+version = "0.1.2"
+source = "git+https://github.com/lukaslihotzki/vb64?branch=update#01e791186f57982511a3bcfb0d2316010c1adef0"
 
 [[package]]
 name = "version-compare"

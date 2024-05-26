@@ -1,1 +1,0 @@
-- Look into more efficient 'skip'ing in ratatui so that you don't have to unicode_width::width a bunch of escape codes

@@ -146,7 +146,7 @@ impl Tui {
 
 		let (msg_str, color) = match self.bottom_msg {
 			BottomMessage::Help => (
-				"/: Search, g: Go To Page".to_string(),
+				"/: Search, g: Go To Page, n: Next Search Result, N: Previous Search Result".to_string(),
 				Color::Blue
 			),
 			BottomMessage::Error(ref e) => (
@@ -248,8 +248,6 @@ impl Tui {
 	}
 
 	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
-		// TODO: Sometimes a page just won't render. But there will be space for it so we clearly
-		// know it should be there. Maybe we're not resetting the last render rect as we should be?
 		match self.rendered[page_idx].img {
 			Some(ref page_img) => frame.render_widget(Image::new(&**page_img), img_area),
 			None => Self::render_loading_in(frame, img_area)

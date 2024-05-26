@@ -6,8 +6,10 @@ edition = "2021"
 [dependencies]
 poppler-rs = { version = "0.23.0", features = ["v21_5"] }
 cairo-rs = { version = "0.19.4", features = ["png"] }
+# we're using this branch because it has significant performance fixes that I'm waiting on responses from the upstream devs to get upstreamed. See https://github.com/ratatui-org/ratatui/issues/1116
 ratatui = { git = "https://github.com/itsjunetime/ratatui.git" }
 # ratatui = { path = "./ratatui" }
+# We're using this to have the vb64 feature (for faster base64 encoding, since that does take up a good bit of time when converting images to the Box<dyn ratatui_image::Protocol>. It also just includes a few more features that I'm waiting on main to upstream
 ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", branch = "vb64_on_personal", features = ["rustix", "vb64"], default-features = false }
 # ratatui-image = { path = "./ratatui-image", features = ["rustix", "vb64"], default-features = false }
 crossterm = { version = "0.27.0", features = ["event-stream"] }

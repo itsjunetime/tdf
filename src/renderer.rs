@@ -208,7 +208,12 @@ pub fn start_rendering(
 					Ok(None) => (),
 					// If that fn returned Some, that means it needed to be re-rendered for some
 					// reason or another, so we're sending it here
-					Ok(Some(img)) => sender.blocking_send(Ok(RenderInfo::Page(img))).unwrap(),
+					Ok(Some(img)) => {
+						// But we first need to store if we already rendered it correctly so that
+						// the next time we iterate through, it might see that we're already good
+						rendered.contained_term = Some(img.search_results > 0);
+						sender.blocking_send(Ok(RenderInfo::Page(img))).unwrap()
+					},
 					// And if we got an error, then obviously we need to propagate that
 					Err(e) => sender.blocking_send(Err(RenderError::Render(e))).unwrap()
 				}

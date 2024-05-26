@@ -59,6 +59,10 @@ pub fn start_rendering(
 		}
 	};
 
+	// We want this outside of 'reload so that if the doc reloads, the search term that somebody
+	// set will still get highlighted in the reloaded doc
+	let mut search_term = None;
+
 	'reload: loop {
 		let doc = match Document::from_file(&path, None) {
 			Err(e) => {
@@ -78,7 +82,6 @@ pub fn start_rendering(
 		// then we can split at that page and render at both sides of it
 		let mut rendered = vec![false; n_pages];
 		let mut start_point = 0;
-		let mut search_term = None;
 
 		// This is kinda a weird way of doing this, but if we get a notification that the area
 		// changed, we want to start re-rending all of the pages, but we don't want to reload the
@@ -109,7 +112,11 @@ pub fn start_rendering(
 						},
 						RenderNotif::Search(term) => {
 							rendered = vec![false; n_pages];
-							search_term = Some(term);
+							if term.is_empty() {
+								search_term = None;
+							} else {
+								search_term = Some(term);
+							}
 							continue 'render_pages;
 						}
 					}
@@ -123,8 +130,9 @@ pub fn start_rendering(
 				.map(|(idx, p)| (idx + start_point, p))
 				.interleave(
 					left.iter_mut()
+						.rev()
 						.enumerate()
-						.map(|(idx, p)| (idx - (start_point + 1), p))
+						.map(|(idx, p)| (start_point - (idx + 1), p))
 				);
 
 			for (num, rendered) in page_iter {
@@ -141,7 +149,11 @@ pub fn start_rendering(
 				};
 
 				// We know this is in range 'cause we're iterating over it
-				let page = doc.page(num as i32).unwrap();
+				let Some(page) = doc.page(num as i32) else {
+					sender.blocking_send(Err(RenderError::Render(format!("Couldn't get page {num} ({}) of doc?? (sp: {start_point}", num as i32))))
+						.unwrap();
+					continue;
+				};
 
 				// render the page
 				let to_send = render_single_page(page, area, num, &search_term)
@@ -239,9 +251,7 @@ fn render_single_page(
 		.map(|term| page.find_text_with_options(term, FindFlags::DEFAULT | FindFlags::MULTILINE))
 		.unwrap_or_default();
 
-	let num_results = result_rects.iter()
-		.filter(|rect| !rect.find_get_match_continued())
-		.count();
+	let num_results = result_rects.len();
 
 	let mut highlight_color = Color::new();
 	highlight_color.set_red((u16::MAX / 5) * 4);
@@ -270,6 +280,8 @@ fn render_single_page(
 	ctx.target().write_to_png(&mut img_data)
 		.map_err(|e| format!("Couldn't write surface to png: {e}"))?;
 
+	// TODO: Maybe cache which pages had no results with the last search term so we don't have to
+	// rerender them when the search term is set to empty and rerenders are requested
 	Ok(PageInfo {
 		img_data: ImageData {
 			data: img_data,

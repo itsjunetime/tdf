@@ -63,6 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend)?;
+	term.skip_diff(true);
 
 	// poppler has some annoying logging (e.g. if you request a page index out-of-bounds of a
 	// document's pages, then it will return `None`, but still log to stderr with CRITICAL level),
@@ -117,17 +118,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 					Ok(RenderInfo::NumPages(num)) => {
 						tui.set_n_pages(num);
 						converter.set_n_pages(num);
-						true
 					},
 					Ok(RenderInfo::Page(info)) => {
+						tui.got_num_results_on_page(info.page, info.search_results);
 						converter.add_img(info);
-						false
 					},
-					Err(e) => {
-						tui.show_error(e);
-						true
-					}
+					Err(e) => tui.show_error(e),
 				}
+				true
 			}
 		};
 

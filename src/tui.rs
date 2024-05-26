@@ -9,10 +9,9 @@ use crate::{renderer::RenderError, skip::Skip};
 pub struct Tui {
 	name: String,
 	page: usize,
-	error: Option<String>,
-	input_state: Option<InputCommand>,
 	last_render: LastRender,
-	rendered: Vec<Option<RenderedInfo>>,
+	bottom_msg: BottomMessage,
+	rendered: Vec<RenderedInfo>,
 }
 
 #[derive(Default, Debug)]
@@ -24,13 +23,23 @@ struct LastRender {
 	unused_width: u16
 }
 
+#[derive(Default)]
+enum BottomMessage {
+	#[default]
+	Help,
+	SearchResults(String),
+	Error(String),
+	Input(InputCommand)
+}
+
 enum InputCommand {
 	GoToPage(usize),
 	Search(String)
 }
 
+#[derive(Default)]
 struct RenderedInfo {
-	img: Box<dyn Protocol>,
+	img: Option<Box<dyn Protocol>>,
 	num_results: usize
 }
 
@@ -39,8 +48,7 @@ impl Tui {
 		Self {
 			name,
 			page: 0,
-			error: None,
-			input_state: None,
+			bottom_msg: BottomMessage::Help,
 			last_render: LastRender::default(),
 			rendered: vec![],
 		}
@@ -107,7 +115,7 @@ impl Tui {
 		let rendered_str = if !self.rendered.is_empty() {
 			format!(
 				"Rendered: {}%",
-				(self.rendered.iter().filter(|i| i.is_some()).count() * 100) / self.rendered.len()
+				(self.rendered.iter().filter(|i| i.img.is_some()).count() * 100) / self.rendered.len()
 			)
 		} else {
 			String::new()
@@ -125,22 +133,30 @@ impl Tui {
 		);
 		frame.render_widget(rendered_span, bottom_layout[1]);
 
-		if let Some(ref error_str) = self.error {
-			let span = Span::styled(
-				format!("Couldn't render a page: {error_str}"),
-				Style::new()
-					.fg(Color::Red)
-			);
-			frame.render_widget(span, bottom_layout[0]);
-		} else if let Some(ref cmd) = self.input_state {
-			let cmd_str = match cmd {
-				InputCommand::GoToPage(page) => format!("Go to: {page}"),
-				InputCommand::Search(s) => format!("Search: {s}"),
-			};
+		let (msg_str, color) = match self.bottom_msg {
+			BottomMessage::Help => (
+				"/: Search, g: Go To Page".to_string(),
+				Color::Blue
+			),
+			BottomMessage::Error(ref e) => (
+				format!("Couldn't render a page: {e}"),
+				Color::Red
+			),
+			BottomMessage::Input(ref input_state) => (
+				match input_state {
+					InputCommand::GoToPage(page) => format!("Go to: {page}"),
+					InputCommand::Search(s) => format!("Search: {s}"),
+				},
+				Color::Blue
+			),
+			BottomMessage::SearchResults(ref term) => (
+				format!("Results for '{term}': {}", self.rendered.iter().map(|r| r.num_results).sum::<usize>()),
+				Color::Blue
+			),
+		};
 
-			let span = Span::styled(cmd_str, Style::new().fg(Color::Blue));
-			frame.render_widget(span, bottom_layout[0]);
-		}
+		let span = Span::styled(msg_str, Style::new().fg(color));
+		frame.render_widget(span, bottom_layout[0]);
 
 		let mut img_area = main_area[1];
 
@@ -160,12 +176,12 @@ impl Tui {
 				// render each page)
 				.enumerate()
 				// and only take as many as are ready to be rendered
-				.take_while(|(_, page)| page.is_some())
+				.take_while(|(_, page)| page.img.is_some())
 				// and map it to their width (in cells on the terminal, not pixels)
 				.flat_map(|(idx, page)|
-					page.as_ref().map(|img| (
+					page.img.as_ref().map(|img| (
 						idx,
-						img.img.rect().width,
+						img.rect().width,
 					))
 				)
 				// and then take them as long as they won't overflow the available area.
@@ -217,8 +233,10 @@ impl Tui {
 	}
 
 	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
-		match self.rendered[page_idx] {
-			Some(ref page_img) => frame.render_widget(Image::new(&*page_img.img), img_area),
+		// TODO: Sometimes a page just won't render. But there will be space for it so we clearly
+		// know it should be there. Maybe we're not resetting the last render rect as we should be?
+		match self.rendered[page_idx].img {
+			Some(ref page_img) => frame.render_widget(Image::new(&**page_img), img_area),
 			None => Self::render_loading_in(frame, img_area)
 		};
 	}
@@ -256,7 +274,7 @@ impl Tui {
 	pub fn set_n_pages(&mut self, n_pages: usize) {
 		self.rendered = Vec::with_capacity(n_pages);
 		for _ in 0..n_pages {
-			self.rendered.push(None);
+			self.rendered.push(RenderedInfo::default());
 		}
 		self.page = self.page.min(n_pages - 1);
 	}
@@ -281,18 +299,22 @@ impl Tui {
 		// We always just set this here because we handle reloading in the `set_n_pages` function.
 		// If the document was reloaded, then It'll have the `set_n_pages` called to set the new
 		// number of pages, so the vec will already be cleared
-		self.rendered[page_num] = Some(RenderedInfo { img, num_results })
+		self.rendered[page_num] = RenderedInfo { img: Some(img), num_results };
+	}
+
+	pub fn got_num_results_on_page(&mut self, page_num: usize, num_results: usize) {
+		self.rendered[page_num].num_results = num_results;
 	}
 
 	pub fn handle_event(&mut self, ev: Event) -> Option<InputAction> {
 		match ev {
 			Event::Key(key) => {
 				match key.code {
-					KeyCode::Char(c) if let Some(InputCommand::Search(ref mut term)) = self.input_state => {
+					KeyCode::Char(c) if let BottomMessage::Input(InputCommand::Search(ref mut term)) = self.bottom_msg => {
 						term.push(c);
 						Some(InputAction::Redraw)
 					},
-					KeyCode::Char(c) if let Some(InputCommand::GoToPage(ref mut page)) = self.input_state => {
+					KeyCode::Char(c) if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) = self.bottom_msg => {
 						c.to_digit(10)
 							.map(|input_num| {
 								*page = (*page * 10) + input_num as usize;
@@ -303,42 +325,63 @@ impl Tui {
 					KeyCode::Down | KeyCode::Char('j') => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
 					KeyCode::Left | KeyCode::Char('h') => self.change_page(PageChange::Prev, ChangeAmount::Single),
 					KeyCode::Up | KeyCode::Char('k') => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-					KeyCode::Esc | KeyCode::Char('q') => {
-						if self.input_state.is_some() {
-							self.input_state = None;
-							Some(InputAction::Redraw)
-						} else {
-							Some(InputAction::QuitApp)
-						}
-					},
+					KeyCode::Esc | KeyCode::Char('q') => Some(InputAction::QuitApp),
 					KeyCode::Char('g') => {
-						self.input_state = Some(InputCommand::GoToPage(0));
+						self.bottom_msg = BottomMessage::Input(InputCommand::GoToPage(0));
 						Some(InputAction::Redraw)
 					},
 					KeyCode::Char('/') => {
-						self.input_state = Some(InputCommand::Search(String::new()));
+						self.bottom_msg = BottomMessage::Input(InputCommand::Search(String::new()));
 						Some(InputAction::Redraw)
 					},
-					KeyCode::Char('n') => {
-						let next_page = self.rendered[self.page..]
+					KeyCode::Char('n') if self.page < self.rendered.len() - 1 => {
+						// TODO: If we can't find one, then maybe like block until we've verified
+						// all the pages have been checked?
+						let next_page = self.rendered[(self.page + 1)..]
 							.iter()
 							.enumerate()
-							.filter_map(|(idx, p)| p.as_ref().map(|p| (idx, p)))
-							.find_map(|(idx, p)| (p.num_results > 0).then_some(idx));
+							.find_map(|(idx, p)| (p.num_results > 0).then_some(self.page + 1 + idx));
 						if let Some(page) = next_page {
 							self.page = page;
+							// Make sure we re-render
+							self.last_render.rect = Rect::default();
+							Some(InputAction::JumpingToPage(page))
+						} else {
+							None
 						}
-						next_page.map(|_| InputAction::Redraw)
 					},
-					KeyCode::Enter => self.input_state.take()
-						.and_then(|cmd| match cmd {
+					// TODO: Add 'N' key to go back a search page
+					KeyCode::Enter => {
+						let BottomMessage::Input(_) = self.bottom_msg else {
+							return None;
+						};
+
+						let BottomMessage::Input(cmd) = std::mem::take(&mut self.bottom_msg) else {
+							// We need to verify it's an input msg currently, and only then take it
+							// and replace it by a default Help message. Don't exactly know how to
+							// do this otherwise.
+							unreachable!();
+						};
+
+						match cmd {
 							// Only forward the command if it's within range
 							InputCommand::GoToPage(page) => (page < self.rendered.len()).then(|| {
 								self.set_page(page);
 								InputAction::JumpingToPage(page)
 							}),
-							InputCommand::Search(term) => Some(InputAction::Search(term)),
-						}),
+							InputCommand::Search(term) => {
+								// We only want to show search results if there would actually be
+								// data to show
+								if !term.is_empty() {
+									self.bottom_msg = BottomMessage::SearchResults(term.clone());
+								}
+								// but we still want to tell the rest of the system that we set the
+								// search term to '' so that they can re-render the pages wthout
+								// the highlighting
+								Some(InputAction::Search(term))
+							}
+						}
+					},
 					_ => None,
 				}
 			},
@@ -357,7 +400,7 @@ impl Tui {
 	}
 
 	pub fn show_error(&mut self, err: RenderError) {
-		self.error = Some(match err {
+		self.bottom_msg = BottomMessage::Error(match err {
 			RenderError::Doc(e) => format!("Couldn't open document: {e}"),
 			RenderError::Render(e) => format!("Couldn't render page: {e}")
 		});

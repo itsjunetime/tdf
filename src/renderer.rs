@@ -150,7 +150,7 @@ pub fn start_rendering(
 
 				// We know this is in range 'cause we're iterating over it
 				let Some(page) = doc.page(num as i32) else {
-					sender.blocking_send(Err(RenderError::Render(format!("Couldn't get page {num} ({}) of doc?? (sp: {start_point}", num as i32))))
+					sender.blocking_send(Err(RenderError::Render(format!("Couldn't get page {num} ({}) of doc??", num as i32))))
 						.unwrap();
 					continue;
 				};

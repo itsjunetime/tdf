@@ -11,6 +11,7 @@ pub struct Tui {
 	page: usize,
 	last_render: LastRender,
 	bottom_msg: BottomMessage,
+	prev_msg: Option<BottomMessage>,
 	rendered: Vec<RenderedInfo>,
 }
 
@@ -37,10 +38,17 @@ enum InputCommand {
 	Search(String)
 }
 
+// This seems like a kinda weird struct because it holds two optionals but any representation
+// within it is valid; I think it's the best way to represent it
 #[derive(Default)]
 struct RenderedInfo {
+	// The image, if it has been rendered by `Converter` to that struct
 	img: Option<Box<dyn Protocol>>,
-	num_results: usize
+	// The number of results for the current search term that have been found on this page. None if
+	// we haven't checked this page yet
+	// Also this isn't the most efficient representation of this value, but it's accurate, so like
+	// whatever I guess
+	num_results: Option<usize>
 }
 
 impl Tui {
@@ -48,6 +56,7 @@ impl Tui {
 		Self {
 			name,
 			page: 0,
+			prev_msg: None,
 			bottom_msg: BottomMessage::Help,
 			last_render: LastRender::default(),
 			rendered: vec![],
@@ -149,10 +158,14 @@ impl Tui {
 				},
 				Color::Blue
 			),
-			BottomMessage::SearchResults(ref term) => (
-				format!("Results for '{term}': {}", self.rendered.iter().map(|r| r.num_results).sum::<usize>()),
-				Color::Blue
-			),
+			BottomMessage::SearchResults(ref term) => {
+				let num_found = self.rendered.iter().filter_map(|r| r.num_results).sum::<usize>();
+				let num_searched = self.rendered.iter().filter(|r| r.num_results.is_some()).count() * 100;
+				(
+					format!("Results for '{term}': {num_found} (searched: {}%)", num_searched / self.rendered.len()),
+					Color::Blue
+				)
+			},
 		};
 
 		let span = Span::styled(msg_str, Style::new().fg(color));
@@ -299,11 +312,11 @@ impl Tui {
 		// We always just set this here because we handle reloading in the `set_n_pages` function.
 		// If the document was reloaded, then It'll have the `set_n_pages` called to set the new
 		// number of pages, so the vec will already be cleared
-		self.rendered[page_num] = RenderedInfo { img: Some(img), num_results };
+		self.rendered[page_num] = RenderedInfo { img: Some(img), num_results: Some(num_results) };
 	}
 
 	pub fn got_num_results_on_page(&mut self, page_num: usize, num_results: usize) {
-		self.rendered[page_num].num_results = num_results;
+		self.rendered[page_num].num_results = Some(num_results);
 	}
 
 	pub fn handle_event(&mut self, ev: Event) -> Option<InputAction> {
@@ -327,11 +340,11 @@ impl Tui {
 					KeyCode::Up | KeyCode::Char('k') => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
 					KeyCode::Esc | KeyCode::Char('q') => Some(InputAction::QuitApp),
 					KeyCode::Char('g') => {
-						self.bottom_msg = BottomMessage::Input(InputCommand::GoToPage(0));
+						self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::GoToPage(0))));
 						Some(InputAction::Redraw)
 					},
 					KeyCode::Char('/') => {
-						self.bottom_msg = BottomMessage::Input(InputCommand::Search(String::new()));
+						self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::Search(String::new()))));
 						Some(InputAction::Redraw)
 					},
 					KeyCode::Char('n') if self.page < self.rendered.len() - 1 => {
@@ -340,7 +353,10 @@ impl Tui {
 						let next_page = self.rendered[(self.page + 1)..]
 							.iter()
 							.enumerate()
-							.find_map(|(idx, p)| (p.num_results > 0).then_some(self.page + 1 + idx));
+							.find_map(|(idx, p)| p.num_results
+								.is_some_and(|num| num > 0)
+								.then_some(self.page + 1 + idx)
+							);
 						if let Some(page) = next_page {
 							self.page = page;
 							// Make sure we re-render
@@ -356,7 +372,8 @@ impl Tui {
 							return None;
 						};
 
-						let BottomMessage::Input(cmd) = std::mem::take(&mut self.bottom_msg) else {
+						self.set_bottom_msg(None);
+						let Some(BottomMessage::Input(ref cmd)) = self.prev_msg else {
 							// We need to verify it's an input msg currently, and only then take it
 							// and replace it by a default Help message. Don't exactly know how to
 							// do this otherwise.
@@ -365,15 +382,25 @@ impl Tui {
 
 						match cmd {
 							// Only forward the command if it's within range
-							InputCommand::GoToPage(page) => (page < self.rendered.len()).then(|| {
-								self.set_page(page);
-								InputAction::JumpingToPage(page)
-							}),
+							InputCommand::GoToPage(page) => {
+								let page = *page;
+								(page < self.rendered.len()).then(|| {
+									self.set_page(page);
+									InputAction::JumpingToPage(page)
+								})
+							},
 							InputCommand::Search(term) => {
+								let term = term.clone();
+
 								// We only want to show search results if there would actually be
 								// data to show
 								if !term.is_empty() {
-									self.bottom_msg = BottomMessage::SearchResults(term.clone());
+									self.set_bottom_msg(Some(BottomMessage::SearchResults(term.clone())));
+								}
+
+								// Reset all the search results
+								for img in &mut self.rendered {
+									img.num_results = None;
 								}
 								// but we still want to tell the rest of the system that we set the
 								// search term to '' so that they can re-render the pages wthout
@@ -400,10 +427,10 @@ impl Tui {
 	}
 
 	pub fn show_error(&mut self, err: RenderError) {
-		self.bottom_msg = BottomMessage::Error(match err {
+		self.set_bottom_msg(Some(BottomMessage::Error(match err {
 			RenderError::Doc(e) => format!("Couldn't open document: {e}"),
 			RenderError::Render(e) => format!("Couldn't render page: {e}")
-		});
+		})));
 	}
 
 	fn set_page(&mut self, page: usize) {
@@ -411,6 +438,22 @@ impl Tui {
 			// mark that we need to re-render the images
 			self.last_render.rect = Rect::default();
 			self.page = page;
+		}
+	}
+
+	// We have `msg` as optional so that if they reset it to none, it'll replace it with
+	// `prev_msg`, but if they reset it to something else, it'll put the current thing in prev_msg
+	fn set_bottom_msg(&mut self, msg: Option<BottomMessage>) {
+		match msg {
+			Some(mut msg) => {
+				std::mem::swap(&mut self.bottom_msg, &mut msg);
+				self.prev_msg = Some(msg);
+			},
+			None => {
+				let mut new_bottom = self.prev_msg.take().unwrap_or_default();
+				std::mem::swap(&mut self.bottom_msg, &mut new_bottom);
+				self.prev_msg = Some(new_bottom);
+			},
 		}
 	}
 }

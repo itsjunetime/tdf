@@ -82,11 +82,12 @@ impl Tui {
 				Constraint::Fill(1),
 				Constraint::Length(3)
 			])
-			.horizontal_margin(4)
-			.vertical_margin(2)
+			.horizontal_margin(2)
+			.vertical_margin(1)
 			.split(frame.size())
 	}
 
+	// TODO: Make a way to fill the width of the screen with one page and scroll down to view it
 	pub fn render(&mut self, frame: &mut Frame<'_>, main_area: &[Rect], end_update: &mut bool) {
 		let top_block = Block::new()
 			.padding(Padding {

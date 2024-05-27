@@ -2,12 +2,11 @@
 
 use std::{io::stdout, path::PathBuf, str::FromStr};
 
-use converter::{ConvertedPage, Converter};
+use converter::{run_conversion_loop, ConvertedPage, ConverterMsg};
 use crossterm::{
 	execute,
 	terminal::{
-		disable_raw_mode, enable_raw_mode, EndSynchronizedUpdate, EnterAlternateScreen,
-		LeaveAlternateScreen
+		disable_raw_mode, enable_raw_mode, window_size, EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen
 	}
 };
 use futures_util::stream::StreamExt;
@@ -17,19 +16,20 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
 use renderer::{RenderInfo, RenderNotif};
 use tui::{InputAction, Tui};
+use futures_util::FutureExt;
 
 mod converter;
 mod renderer;
 mod skip;
 mod tui;
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut args = std::env::args().skip(1);
 	let file = args.next().ok_or("Program requires a file to process")?;
 	let path = PathBuf::from_str(&file)?.canonicalize()?;
 
-	let (watch_tx, render_rx) = tokio::sync::mpsc::channel(1);
+	let (watch_tx, render_rx) = tokio::sync::mpsc::unbounded_channel();
 	let tui_tx = watch_tx.clone();
 
 	// we need to call this outside the recommended_watcher call because if we call it inside, that
@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		// then like the main thread has panicked or something, so it doesn't matter if this panics
 		// as well
 		watch_tx
-			.blocking_send(renderer::RenderNotif::Reload)
+			.send(renderer::RenderNotif::Reload)
 			.unwrap();
 	})?;
 
@@ -49,19 +49,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	watcher.watch(&path, RecursiveMode::NonRecursive)?;
 
 	let file_path = format!("file://{}", path.clone().into_os_string().to_string_lossy());
-	let (render_tx, mut tui_rx) = tokio::sync::mpsc::channel(1);
+	let (render_tx, mut tui_rx) = tokio::sync::mpsc::unbounded_channel();
+
+	let window_size = window_size()?;
 
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,
 	// it messes up something with user input. Input never makes it to the crossterm thing
-	let mut picker = Picker::from_termios()?;
+	let mut picker = Picker::new((window_size.width / window_size.columns, window_size.height / window_size.rows));
 	picker.guess_protocol();
 
 	// then we want to spawn off the rendering task
 	// We need to use the thread::spawn API so that this exists in a thread not owned by tokio,
 	// since the methods we call in `start_rendering` will panic if called in an async context
-	std::thread::spawn(move || renderer::start_rendering(file_path, render_tx, render_rx));
+	std::thread::spawn(move || renderer::start_rendering(file_path, render_tx, render_rx, window_size));
 
 	let mut ev_stream = crossterm::event::EventStream::new();
+
+	let (to_converter, from_main) = tokio::sync::mpsc::unbounded_channel();
+	let (to_main, mut from_converter) = tokio::sync::mpsc::unbounded_channel();
+
+	tokio::spawn(run_conversion_loop(to_main, from_main, picker));
 
 	let file_name = path
 		.file_name()
@@ -78,9 +85,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// document's pages, then it will return `None`, but still log to stderr with CRITICAL level),
 	// so we want to just ignore all logging since this is a tui app.
 	glib::log_set_writer_func(noop);
-
-	let mut converter = Converter::new(picker);
-
 	execute!(
 		term.backend_mut(),
 		EnterAlternateScreen,
@@ -89,19 +93,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	enable_raw_mode()?;
 
 	let mut main_area = tui::Tui::main_layout(&term.get_frame());
-	tui_tx.send(RenderNotif::Area(main_area[1])).await?;
+	tui_tx.send(RenderNotif::Area(main_area[1]))?;
 
 	loop {
 		let mut needs_redraw = tokio::select! {
-			Some(img_res) = converter.next() => {
-				match img_res {
-					Ok(ConvertedPage { page, num, num_results }) => tui.page_ready(page, num, num_results),
-					Err(e) => tui.show_error(e),
-				}
-				true
-			},
 			// First we check if we have any keystrokes
-			Some(ev) = ev_stream.next() => {
+			Some(ev) = ev_stream.next().fuse() => {
 				// If we can't get user input, just crash.
 				let ev = ev.expect("Couldn't get any user input");
 
@@ -111,12 +108,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 						match action {
 							InputAction::Redraw => (),
 							InputAction::QuitApp => break,
-							InputAction::ChangePageBy(change) => converter.change_page_by(change),
 							InputAction::JumpingToPage(page) => {
-								tui_tx.send(RenderNotif::JumpToPage(page)).await?;
-								converter.go_to_page(page);
+								tui_tx.send(RenderNotif::JumpToPage(page))?;
+								to_converter.send(ConverterMsg::GoToPage(page))?;
 							},
-							InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term)).await?,
+							InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term))?,
 						};
 						true
 					}
@@ -126,35 +122,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 				match renderer_msg {
 					Ok(RenderInfo::NumPages(num)) => {
 						tui.set_n_pages(num);
-						converter.set_n_pages(num);
+						to_converter.send(ConverterMsg::NumPages(num))?;
 					},
 					Ok(RenderInfo::Page(info)) => {
 						tui.got_num_results_on_page(info.page, info.search_results);
-						converter.add_img(info);
+						to_converter.send(ConverterMsg::AddImg(info))?;
 					},
 					Err(e) => tui.show_error(e),
 				}
 				true
 			}
+			Some(img_res) = from_converter.recv() => {
+				match img_res {
+					Ok(ConvertedPage { page, num, num_results }) => tui.page_ready(page, num, num_results),
+					Err(e) => tui.show_error(e),
+				}
+				true
+			},
 		};
 
 		let new_area = Tui::main_layout(&term.get_frame());
 		if new_area != main_area {
 			main_area = new_area;
-			tui_tx.send(RenderNotif::Area(main_area[1])).await?;
+			tui_tx.send(RenderNotif::Area(main_area[1]))?;
 			needs_redraw = true;
 		}
 
 		if needs_redraw {
-			let mut end_update = false;
 			term.draw(|f| {
-				tui.render(f, &main_area, &mut end_update);
-				// To be enabled when https://github.com/ratatui-org/ratatui/issues/1116 gets fixed
-				// f.bypass_diff = true;
+				tui.render(f, &main_area);
 			})?;
-			if end_update {
-				execute!(stdout(), EndSynchronizedUpdate)?;
-			}
+			execute!(stdout(), EndSynchronizedUpdate)?;
 		}
 	}
 

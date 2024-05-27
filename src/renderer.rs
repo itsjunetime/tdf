@@ -1,8 +1,9 @@
 use cairo::{Antialias, Format};
+use crossterm::terminal::WindowSize;
 use itertools::Itertools;
 use poppler::{Color, Document, FindFlags, Page, Rectangle, SelectionStyle};
 use ratatui::layout::Rect;
-use tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender};
+use tokio::sync::mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender};
 
 pub enum RenderNotif {
 	Area(Rect),
@@ -41,7 +42,7 @@ struct PrevRender {
 	contained_term: Option<bool>
 }
 
-fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
+pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 	vec.clear();
 	vec.reserve(size.saturating_sub(vec.len()));
 	for _ in 0..size {
@@ -60,8 +61,9 @@ fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 // we're done.
 pub fn start_rendering(
 	path: String,
-	sender: Sender<Result<RenderInfo, RenderError>>,
-	mut receiver: Receiver<RenderNotif>
+	sender: UnboundedSender<Result<RenderInfo, RenderError>>,
+	mut receiver: UnboundedReceiver<RenderNotif>,
+	size: WindowSize
 ) {
 	// first, wait 'til we get told what the current starting area is so that we can set it to
 	// know what to render to
@@ -80,7 +82,7 @@ pub fn start_rendering(
 	'reload: loop {
 		let doc = match Document::from_file(&path, None) {
 			Err(e) => {
-				sender.blocking_send(Err(RenderError::Doc(e))).unwrap();
+				sender.send(Err(RenderError::Doc(e))).unwrap();
 				return;
 			}
 			Ok(d) => d
@@ -88,7 +90,7 @@ pub fn start_rendering(
 
 		let n_pages = doc.n_pages() as usize;
 		sender
-			.blocking_send(Ok(RenderInfo::NumPages(n_pages)))
+			.send(Ok(RenderInfo::NumPages(n_pages)))
 			.unwrap();
 
 		// We're using this vec of bools to indicate which page numbers have already been rendered,
@@ -190,7 +192,7 @@ pub fn start_rendering(
 				// We know this is in range 'cause we're iterating over it
 				let Some(page) = doc.page(num as i32) else {
 					sender
-						.blocking_send(Err(RenderError::Render(format!(
+						.send(Err(RenderError::Render(format!(
 							"Couldn't get page {num} ({}) of doc?",
 							num as i32
 						))))
@@ -202,7 +204,7 @@ pub fn start_rendering(
 					rendered.successful && rendered.contained_term == Some(false);
 
 				// render the page
-				match render_single_page(page, area, num, &search_term, rendered_with_no_results) {
+				match render_single_page(page, area, num, &search_term, rendered_with_no_results, &size) {
 					// If we've already rendered it just fine and we don't need to render it again,
 					// just continue. We're all good
 					Ok(None) => (),
@@ -212,10 +214,11 @@ pub fn start_rendering(
 						// But we first need to store if we already rendered it correctly so that
 						// the next time we iterate through, it might see that we're already good
 						rendered.contained_term = Some(img.search_results > 0);
-						sender.blocking_send(Ok(RenderInfo::Page(img))).unwrap()
+						rendered.successful = true;
+						sender.send(Ok(RenderInfo::Page(img))).unwrap()
 					},
 					// And if we got an error, then obviously we need to propagate that
-					Err(e) => sender.blocking_send(Err(RenderError::Render(e))).unwrap()
+					Err(e) => sender.send(Err(RenderError::Render(e))).unwrap()
 				}
 			}
 			// Then once we've rendered all these pages, wait until we get another notification
@@ -237,7 +240,8 @@ fn render_single_page(
 	area: Rect,
 	page_num: usize,
 	search_term: &Option<String>,
-	already_rendered_no_results: bool
+	already_rendered_no_results: bool,
+	size: &WindowSize
 ) -> Result<Option<PageInfo>, String> {
 	let mut result_rects = search_term
 		.as_ref()
@@ -252,8 +256,6 @@ fn render_single_page(
 
 	// First, get the font size; the number of pixels (width x height) per font character (I
 	// think; it's at least something like that) on this terminal screen.
-	let size =
-		crossterm::terminal::window_size().map_err(|e| format!("Couldn't get window size: {e}"))?;
 	let col_h = size.height / size.rows;
 	let col_w = size.width / size.columns;
 

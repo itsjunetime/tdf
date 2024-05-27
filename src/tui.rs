@@ -88,7 +88,7 @@ impl Tui {
 	}
 
 	// TODO: Make a way to fill the width of the screen with one page and scroll down to view it
-	pub fn render(&mut self, frame: &mut Frame<'_>, main_area: &[Rect], end_update: &mut bool) {
+	pub fn render(&mut self, frame: &mut Frame<'_>, main_area: &[Rect]) {
 		let top_block = Block::new()
 			.padding(Padding {
 				right: 2,
@@ -220,7 +220,6 @@ impl Tui {
 				Self::render_loading_in(frame, img_area);
 			} else {
 				execute!(stdout(), BeginSynchronizedUpdate).unwrap();
-				*end_update = true;
 
 				let total_width = page_widths.iter().map(|(_, w)| w).sum::<u16>();
 
@@ -283,7 +282,7 @@ impl Tui {
 
 		match self.page as isize - old as isize {
 			0 => None,
-			change => Some(InputAction::ChangePageBy(change))
+			_ => Some(InputAction::JumpingToPage(self.page))
 		}
 	}
 
@@ -517,7 +516,6 @@ impl Tui {
 
 pub enum InputAction {
 	Redraw,
-	ChangePageBy(isize),
 	JumpingToPage(usize),
 	Search(String),
 	QuitApp

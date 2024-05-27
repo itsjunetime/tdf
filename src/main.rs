@@ -6,17 +6,17 @@ use converter::{run_conversion_loop, ConvertedPage, ConverterMsg};
 use crossterm::{
 	execute,
 	terminal::{
-		disable_raw_mode, enable_raw_mode, window_size, EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen
+		disable_raw_mode, enable_raw_mode, window_size, EndSynchronizedUpdate,
+		EnterAlternateScreen, LeaveAlternateScreen
 	}
 };
-use futures_util::stream::StreamExt;
+use futures_util::{stream::StreamExt, FutureExt};
 use glib::{LogField, LogLevel, LogWriterOutput};
 use notify::{RecursiveMode, Watcher};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
 use renderer::{RenderInfo, RenderNotif};
 use tui::{InputAction, Tui};
-use futures_util::FutureExt;
 
 mod converter;
 mod renderer;
@@ -39,9 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		// This shouldn't fail to send unless the receiver gets disconnected. If that's happened,
 		// then like the main thread has panicked or something, so it doesn't matter if this panics
 		// as well
-		watch_tx
-			.send(renderer::RenderNotif::Reload)
-			.unwrap();
+		watch_tx.send(renderer::RenderNotif::Reload).unwrap();
 	})?;
 
 	// We're making this nonrecursive 'cause we're just watching a single file, so there's nothing
@@ -55,13 +53,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,
 	// it messes up something with user input. Input never makes it to the crossterm thing
-	let mut picker = Picker::new((window_size.width / window_size.columns, window_size.height / window_size.rows));
+	let mut picker = Picker::new((
+		window_size.width / window_size.columns,
+		window_size.height / window_size.rows
+	));
 	picker.guess_protocol();
 
 	// then we want to spawn off the rendering task
 	// We need to use the thread::spawn API so that this exists in a thread not owned by tokio,
 	// since the methods we call in `start_rendering` will panic if called in an async context
-	std::thread::spawn(move || renderer::start_rendering(file_path, render_tx, render_rx, window_size));
+	std::thread::spawn(move || {
+		renderer::start_rendering(file_path, render_tx, render_rx, window_size)
+	});
 
 	let mut ev_stream = crossterm::event::EventStream::new();
 

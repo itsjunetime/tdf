@@ -89,9 +89,7 @@ pub fn start_rendering(
 		};
 
 		let n_pages = doc.n_pages() as usize;
-		sender
-			.send(Ok(RenderInfo::NumPages(n_pages)))
-			.unwrap();
+		sender.send(Ok(RenderInfo::NumPages(n_pages))).unwrap();
 
 		// We're using this vec of bools to indicate which page numbers have already been rendered,
 		// to support people jumping to specific pages and having quick rendering results. We
@@ -204,7 +202,14 @@ pub fn start_rendering(
 					rendered.successful && rendered.contained_term == Some(false);
 
 				// render the page
-				match render_single_page(page, area, num, &search_term, rendered_with_no_results, &size) {
+				match render_single_page(
+					page,
+					area,
+					num,
+					&search_term,
+					rendered_with_no_results,
+					&size
+				) {
 					// If we've already rendered it just fine and we don't need to render it again,
 					// just continue. We're all good
 					Ok(None) => (),
@@ -216,7 +221,7 @@ pub fn start_rendering(
 						rendered.contained_term = Some(img.search_results > 0);
 						rendered.successful = true;
 						sender.send(Ok(RenderInfo::Page(img))).unwrap()
-					},
+					}
 					// And if we got an error, then obviously we need to propagate that
 					Err(e) => sender.send(Err(RenderError::Render(e))).unwrap()
 				}
@@ -279,9 +284,9 @@ fn render_single_page(
 	// scale the height to fit perfectly. The dimension that _is not_ scaled to fit perfectly
 	// is scaled by the same factor as the dimension that _is_ scaled perfectly.
 	let scale_factor = if p_aspect_ratio > area_aspect_ratio {
-		area_full_w as f64 / p_width
+		area_full_w / p_width
 	} else {
-		area_full_h as f64 / p_height
+		area_full_h / p_height
 	};
 
 	let surface_width = p_width * scale_factor;

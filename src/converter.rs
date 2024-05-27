@@ -1,7 +1,10 @@
 use image::ImageFormat;
 use itertools::Itertools;
 use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
-use tokio::sync::mpsc::{error::{SendError, TryRecvError}, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{
+	error::{SendError, TryRecvError},
+	UnboundedReceiver, UnboundedSender
+};
 
 use crate::renderer::{fill_default, PageInfo, RenderError};
 
@@ -34,7 +37,7 @@ pub async fn run_conversion_loop(
 		iteration: &mut usize
 	) -> Result<Option<ConvertedPage>, RenderError> {
 		if images.is_empty() || *iteration >= MAX_ITER {
-			return Ok(None)
+			return Ok(None);
 		}
 
 		// This kinda mimics the way the renderer alternates between going above and below the
@@ -50,20 +53,28 @@ pub async fn run_conversion_loop(
 			.skip(*iteration)
 			.find_map(|(i_idx, p_idx)| images[p_idx].take().map(|p| (p, i_idx)))
 		else {
-			return Ok(None)
+			return Ok(None);
 		};
 
 		let img_area = page_info.img_data.area;
 
-		let dyn_img = image::load_from_memory_with_format(&page_info.img_data.data, ImageFormat::Png)
-			.map_err(|e| RenderError::Render(format!("Couldn't convert Vec<u8> to DynamicImage: {e}")))?;
+		let dyn_img =
+			image::load_from_memory_with_format(&page_info.img_data.data, ImageFormat::Png)
+				.map_err(|e| {
+					RenderError::Render(format!("Couldn't convert Vec<u8> to DynamicImage: {e}"))
+				})?;
 
 		// We don't actually want to Crop this image, but we've already
 		// verified (with the ImageSurface stuff) that the image is the correct
 		// size for the area given, so to save ratatui the work of having to
 		// resize it, we tell them to crop it to fit.
-		let txt_img = picker.new_protocol(dyn_img, img_area, Resize::Crop)
-			.map_err(|e| RenderError::Render(format!("Couldn't convert DynamicImage to ratatui image: {e}")))?;
+		let txt_img = picker
+			.new_protocol(dyn_img, img_area, Resize::Crop)
+			.map_err(|e| {
+				RenderError::Render(format!(
+					"Couldn't convert DynamicImage to ratatui image: {e}"
+				))
+			})?;
 
 		// update the iteration to the iteration that we stole this image from
 		*iteration = new_iter;
@@ -75,21 +86,17 @@ pub async fn run_conversion_loop(
 		}))
 	}
 
-	fn handle_notif(
-		msg: ConverterMsg,
-		images: &mut Vec<Option<PageInfo>>,
-		page: &mut usize
-	) {
+	fn handle_notif(msg: ConverterMsg, images: &mut Vec<Option<PageInfo>>, page: &mut usize) {
 		match msg {
 			ConverterMsg::AddImg(img) => {
 				let page_num = img.page;
 				images[page_num] = Some(img);
-			},
+			}
 			ConverterMsg::NumPages(n_pages) => {
 				fill_default(images, n_pages);
 				*page = (*page).min(n_pages - 1);
-			},
-			ConverterMsg::GoToPage(new_page) => *page = new_page,
+			}
+			ConverterMsg::GoToPage(new_page) => *page = new_page
 		}
 	}
 
@@ -100,7 +107,7 @@ pub async fn run_conversion_loop(
 				Ok(msg) => {
 					handle_notif(msg, &mut images, &mut page);
 					continue 'outer;
-				},
+				}
 				Err(TryRecvError::Empty) => (),
 				Err(TryRecvError::Disconnected) => panic!("Disconnected :(")
 			}

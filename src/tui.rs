@@ -348,10 +348,13 @@ impl Tui {
 						term.push(c);
 						Some(InputAction::Redraw)
 					}
-					KeyCode::Backspace if let BottomMessage::Input(InputCommand::Search(ref mut term)) = self.bottom_msg => {
+					KeyCode::Backspace
+						if let BottomMessage::Input(InputCommand::Search(ref mut term)) =
+							self.bottom_msg =>
+					{
 						term.pop();
 						Some(InputAction::Redraw)
-					},
+					}
 					KeyCode::Char(c)
 						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) =
 							self.bottom_msg =>

@@ -9,6 +9,7 @@ Designed to be performant, very responsive, and work well with even very large P
 ## Features:
 - Asynchronous Rendering
 - Searching
+- Hot reloading
 - Responsive details about rendering/search progress
 - Reactive layout
 

@@ -2,6 +2,7 @@
 name = "tdf"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [dependencies]
 poppler-rs = { version = "0.23.0", features = ["v21_5"] }

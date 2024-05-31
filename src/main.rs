@@ -1,6 +1,10 @@
 #![feature(if_let_guard)]
 
-use std::{io::stdout, path::PathBuf, str::FromStr};
+use std::{
+	io::{stdout, Read, Write},
+	path::PathBuf,
+	str::FromStr
+};
 
 use converter::{run_conversion_loop, ConvertedPage, ConverterMsg};
 use crossterm::{
@@ -22,6 +26,18 @@ mod converter;
 mod renderer;
 mod skip;
 mod tui;
+
+// Dummy struct for easy errors in main
+#[derive(Debug)]
+struct BadTermSizeStdin(String);
+
+impl std::fmt::Display for BadTermSizeStdin {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
+impl std::error::Error for BadTermSizeStdin {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,7 +65,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let file_path = format!("file://{}", path.clone().into_os_string().to_string_lossy());
 	let (render_tx, mut tui_rx) = tokio::sync::mpsc::unbounded_channel();
 
-	let window_size = window_size()?;
+	let mut window_size = window_size()?;
+
+	if window_size.width == 0 || window_size.height == 0 {
+		// send the command code to get the terminal window size
+		print!("\x1b[14t");
+		std::io::stdout().flush()?;
+
+		// we need to enable raw mode here since this bit of output won't print a newline; it'll
+		// just print the info it wants to tell us. So we want to get all characters as they come
+		enable_raw_mode()?;
+
+		// read in the returned size until we hit a 't' (which indicates to us it's done)
+		let input_vec = std::io::stdin()
+			.bytes()
+			.flat_map(|b| b.ok())
+			.take_while(|b| *b != b't')
+			.collect::<Vec<_>>();
+
+		// and then disable raw mode again in case we return an error in this next section
+		disable_raw_mode()?;
+
+		let input_line = String::from_utf8(input_vec)?;
+
+		if input_line.starts_with("\x1b[4;") {
+			// it should input it to us as `\e[4;<height>;<width>t`, so we need to split to get the h/w
+			let mut splits = input_line.split([';', 't']);
+			// ignore the first val
+			_ = splits.next();
+
+			window_size.height = splits
+				.next()
+				.ok_or_else(|| {
+					BadTermSizeStdin(format!(
+						"Terminal responded with unparseable size response '{input_line}'"
+					))
+				})?
+				.parse::<u16>()?;
+
+			window_size.width = splits
+				.next()
+				.ok_or_else(|| {
+					BadTermSizeStdin(format!(
+						"Terminal responded with unparseable size response '{input_line}'"
+					))
+				})?
+				.parse::<u16>()?;
+		} else {
+			return Err("Your terminal is falsely reporting a window size of 0; tdf needs an accurate window size to display graphics".into());
+		}
+	}
 
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,
 	// it messes up something with user input. Input never makes it to the crossterm thing

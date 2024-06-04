@@ -314,32 +314,34 @@ fn render_single_page(
 	// that as the background color, then paint, then render.
 	ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
 
-	ctx.set_antialias(Antialias::Best);
+	ctx.set_antialias(Antialias::None);
 	ctx.paint()
 		.map_err(|e| format!("Couldn't paint Context: {e}"))?;
 	page.render(&ctx);
 
 	let num_results = result_rects.len();
 
-	let mut highlight_color = Color::new();
-	highlight_color.set_red((u16::MAX / 5) * 4);
-	highlight_color.set_green((u16::MAX / 5) * 4);
+	if !result_rects.is_empty() {
+		let mut highlight_color = Color::new();
+		highlight_color.set_red((u16::MAX / 5) * 4);
+		highlight_color.set_green((u16::MAX / 5) * 4);
 
-	let mut old_rect = Rectangle::new();
-	for rect in result_rects.iter_mut() {
-		// According to https://gitlab.freedesktop.org/poppler/poppler/-/issues/763, these rects
-		// need to be corrected since they use different references as the y-coordinate base
-		rect.set_y1(p_height - rect.y1());
-		rect.set_y2(p_height - rect.y2());
+		let mut old_rect = Rectangle::new();
+		for rect in result_rects.iter_mut() {
+			// According to https://gitlab.freedesktop.org/poppler/poppler/-/issues/763, these rects
+			// need to be corrected since they use different references as the y-coordinate base
+			rect.set_y1(p_height - rect.y1());
+			rect.set_y2(p_height - rect.y2());
 
-		page.render_selection(
-			&ctx,
-			rect,
-			&mut old_rect,
-			SelectionStyle::Glyph,
-			&mut Color::new(),
-			&mut highlight_color
-		);
+			page.render_selection(
+				&ctx,
+				rect,
+				&mut old_rect,
+				SelectionStyle::Glyph,
+				&mut Color::new(),
+				&mut highlight_color
+			);
+		}
 	}
 
 	ctx.scale(1. / scale_factor, 1. / scale_factor);

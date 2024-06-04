@@ -41,8 +41,7 @@ impl std::error::Error for BadTermSizeStdin {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let mut args = std::env::args().skip(1);
-	let file = args.next().ok_or("Program requires a file to process")?;
+	let file = std::env::args().nth(1).ok_or("Program requires a file to process")?;
 	let path = PathBuf::from_str(&file)?.canonicalize()?;
 
 	let (watch_tx, render_rx) = tokio::sync::mpsc::unbounded_channel();

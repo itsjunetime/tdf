@@ -3,10 +3,18 @@ name = "tdf"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
+default-run = "tdf"
+
+[[bin]]
+name = "tdf"
+
+# lib only exists for benching
+[lib]
+name = "tdf"
 
 [dependencies]
-poppler-rs = { version = "0.23.0", features = ["v21_5"] }
-cairo-rs = { version = "0.19.4", features = ["png"] }
+poppler-rs = { version = "0.23.0", default-features = false, features = ["v23_7"] }
+cairo-rs = { version = "0.19.4", default-features = false, features = ["png"] }
 # we're using this branch because it has significant performance fixes that I'm waiting on responses from the upstream devs to get upstreamed. See https://github.com/ratatui-org/ratatui/issues/1116
 ratatui = { git = "https://github.com/itsjunetime/ratatui.git" }
 # ratatui = { path = "./ratatui" }
@@ -24,3 +32,14 @@ itertools = "*"
 [profile.production]
 inherits = "release"
 lto = "fat"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "rendering"
+harness = false
+
+[[bin]]
+name = "for_profiling"
+path = "./benches/for_profiling.rs"

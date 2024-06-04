@@ -1,9 +1,9 @@
 use cairo::{Antialias, Format};
 use crossterm::terminal::WindowSize;
+use flume::{Receiver, Sender, TryRecvError};
 use itertools::Itertools;
 use poppler::{Color, Document, FindFlags, Page, Rectangle, SelectionStyle};
 use ratatui::layout::Rect;
-use tokio::sync::mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender};
 
 pub enum RenderNotif {
 	Area(Rect),
@@ -61,15 +61,15 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 // we're done.
 pub fn start_rendering(
 	path: String,
-	sender: UnboundedSender<Result<RenderInfo, RenderError>>,
-	mut receiver: UnboundedReceiver<RenderNotif>,
+	sender: Sender<Result<RenderInfo, RenderError>>,
+	receiver: Receiver<RenderNotif>,
 	size: WindowSize
 ) {
 	// first, wait 'til we get told what the current starting area is so that we can set it to
 	// know what to render to
 	let mut area;
 	loop {
-		if let RenderNotif::Area(r) = receiver.blocking_recv().unwrap() {
+		if let RenderNotif::Area(r) = receiver.recv().unwrap() {
 			area = r;
 			break;
 		}
@@ -231,7 +231,7 @@ pub fn start_rendering(
 			loop {
 				// This once returned None despite the main thing being still connected (I think, at
 				// last), so I'm just being safe here
-				let Some(msg) = receiver.blocking_recv() else {
+				let Ok(msg) = receiver.recv() else {
 					return;
 				};
 				handle_notif!(msg);
@@ -293,7 +293,7 @@ fn render_single_page(
 	let surface_height = p_height * scale_factor;
 
 	let surface = cairo::ImageSurface::create(
-		Format::ARgb32,
+		Format::Rgb16_565,
 		// No matter how big you make these arguments, the image will be drawn at the same
 		// size. So if you make them really big, the image will be drawn on a quarter of it. If
 		// you make them really small, the image will cover more than all of the surface.
@@ -306,9 +306,9 @@ fn render_single_page(
 		surface_height as i32
 	)
 	.map_err(|e| format!("Couldn't create ImageSurface: {e}"))?;
-	let ctx = cairo::Context::new(surface).map_err(|e| format!("Couldn't create Context: {e}"))?;
+	surface.set_device_scale(scale_factor, scale_factor);
 
-	ctx.scale(scale_factor, scale_factor);
+	let ctx = cairo::Context::new(surface).map_err(|e| format!("Couldn't create Context: {e}"))?;
 
 	// The default background color of PDFs (at least, I think) is white, so we need to set
 	// that as the background color, then paint, then render.
@@ -344,9 +344,7 @@ fn render_single_page(
 		}
 	}
 
-	ctx.scale(1. / scale_factor, 1. / scale_factor);
-
-	let mut img_data = Vec::new();
+	let mut img_data = Vec::with_capacity((surface_height * surface_width) as usize);
 	ctx.target()
 		.write_to_png(&mut img_data)
 		.map_err(|e| format!("Couldn't write surface to png: {e}"))?;

@@ -1,10 +1,8 @@
+use flume::{Receiver, SendError, Sender, TryRecvError};
 use image::ImageFormat;
 use itertools::Itertools;
 use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
-use tokio::sync::mpsc::{
-	error::{SendError, TryRecvError},
-	UnboundedReceiver, UnboundedSender
-};
+use futures_util::stream::StreamExt;
 
 use crate::renderer::{fill_default, PageInfo, RenderError};
 
@@ -23,8 +21,8 @@ pub enum ConverterMsg {
 }
 
 pub async fn run_conversion_loop(
-	sender: UnboundedSender<Result<ConvertedPage, RenderError>>,
-	mut receiver: UnboundedReceiver<ConverterMsg>,
+	sender: Sender<Result<ConvertedPage, RenderError>>,
+	receiver: Receiver<ConverterMsg>,
 	mut picker: Picker
 ) -> Result<(), SendError<Result<ConvertedPage, RenderError>>> {
 	let mut images = vec![];
@@ -119,7 +117,7 @@ pub async fn run_conversion_loop(
 			}
 		}
 
-		let Some(msg) = receiver.recv().await else {
+		let Some(msg) = receiver.stream().next().await else {
 			break;
 		};
 

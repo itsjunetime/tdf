@@ -44,7 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let file = std::env::args().nth(1).ok_or("Program requires a file to process")?;
 	let path = PathBuf::from_str(&file)?.canonicalize()?;
 
-	let (watch_tx, render_rx) = tokio::sync::mpsc::unbounded_channel();
+	//let (watch_tx, render_rx) = tokio::sync::mpsc::unbounded_channel();
+	let (watch_tx, render_rx) = flume::unbounded();
 	let tui_tx = watch_tx.clone();
 
 	// we need to call this outside the recommended_watcher call because if we call it inside, that
@@ -62,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	watcher.watch(&path, RecursiveMode::NonRecursive)?;
 
 	let file_path = format!("file://{}", path.clone().into_os_string().to_string_lossy());
-	let (render_tx, mut tui_rx) = tokio::sync::mpsc::unbounded_channel();
+	let (render_tx, tui_rx) = flume::unbounded();
 
 	let mut window_size = window_size()?;
 
@@ -132,8 +133,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let mut ev_stream = crossterm::event::EventStream::new();
 
-	let (to_converter, from_main) = tokio::sync::mpsc::unbounded_channel();
-	let (to_main, mut from_converter) = tokio::sync::mpsc::unbounded_channel();
+	let (to_converter, from_main) = flume::unbounded();
+	let (to_main, from_converter) = flume::unbounded();
 
 	tokio::spawn(run_conversion_loop(to_main, from_main, picker));
 
@@ -163,6 +164,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut main_area = tui::Tui::main_layout(&term.get_frame());
 	tui_tx.send(RenderNotif::Area(main_area[1]))?;
 
+	let mut tui_rx = tui_rx.into_stream();
+	let mut from_converter = from_converter.into_stream();
+
 	loop {
 		let mut needs_redraw = tokio::select! {
 			// First we check if we have any keystrokes
@@ -186,7 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 					}
 				}
 			},
-			Some(renderer_msg) = tui_rx.recv() => {
+			Some(renderer_msg) = tui_rx.next() => {
 				match renderer_msg {
 					Ok(RenderInfo::NumPages(num)) => {
 						tui.set_n_pages(num);
@@ -200,7 +204,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 				}
 				true
 			}
-			Some(img_res) = from_converter.recv() => {
+			Some(img_res) = from_converter.next() => {
 				match img_res {
 					Ok(ConvertedPage { page, num, num_results }) => tui.page_ready(page, num, num_results),
 					Err(e) => tui.show_error(e),

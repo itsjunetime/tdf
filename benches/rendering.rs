@@ -26,5 +26,9 @@ fn render_example(c: &mut Criterion) {
 	);
 }
 
-criterion_group!(benches, render_dict, render_example);
+criterion_group!(
+	name = benches;
+	config = Criterion::default().sample_size(10);
+	targets = render_dict, render_example
+);
 criterion_main!(benches);

@@ -1,17 +1,18 @@
 use std::{hint::black_box, path::Path};
 
 use crossterm::terminal::WindowSize;
+use flume::{unbounded, Sender};
 use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
 use tdf::{converter::{run_conversion_loop, ConvertedPage, ConverterMsg}, renderer::{fill_default, start_rendering, RenderError, RenderInfo, RenderNotif}};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use futures_util::stream::StreamExt as _;
 
 pub async fn render_doc(path: impl AsRef<Path>) {
 	let pathbuf = path.as_ref().canonicalize().unwrap();
 	let str_path = format!("file://{}", pathbuf.into_os_string().to_string_lossy());
 
-	let (to_render_tx, from_main_rx) = unbounded_channel();
-	let (to_main_tx, mut from_render_rx) = unbounded_channel();
+	let (to_render_tx, from_main_rx) = unbounded();
+	let (to_main_tx, from_render_rx) = unbounded();
 
 	let font_size = (8, 14);
 	let (columns, rows) = (60, 180);
@@ -27,8 +28,8 @@ pub async fn render_doc(path: impl AsRef<Path>) {
 		start_rendering(str_path, to_main_tx, from_main_rx, size)
 	});
 
-	let (mut to_converter_tx, from_main_rx) = unbounded_channel();
-	let (to_main_tx, mut from_converter_rx) = unbounded_channel();
+	let (mut to_converter_tx, from_main_rx) = unbounded();
+	let (to_main_tx, from_converter_rx) = unbounded();
 
 	let mut picker = Picker::new(font_size);
 	picker.protocol_type = ProtocolType::Kitty;
@@ -40,7 +41,7 @@ pub async fn render_doc(path: impl AsRef<Path>) {
 	fn handle_renderer_msg(
 		msg: Result<RenderInfo, RenderError>,
 		pages: &mut Vec<Option<ConvertedPage>>,
-		to_converter_tx: &mut UnboundedSender<tdf::converter::ConverterMsg>,
+		to_converter_tx: &mut Sender<tdf::converter::ConverterMsg>,
 	) {
 		match msg {
 			Ok(RenderInfo::NumPages(num)) => {
@@ -55,7 +56,7 @@ pub async fn render_doc(path: impl AsRef<Path>) {
 	fn handle_converter_msg(
 		msg: Result<ConvertedPage, RenderError>,
 		pages: &mut [Option<ConvertedPage>],
-		to_converter_tx: &mut UnboundedSender<ConverterMsg>
+		to_converter_tx: &mut Sender<ConverterMsg>
 	) {
 		let page = msg.expect("Got error from converter");
 		let num = page.num;
@@ -79,12 +80,15 @@ pub async fn render_doc(path: impl AsRef<Path>) {
 	};
 	to_render_tx.send(RenderNotif::Area(main_area)).unwrap();
 
+	let mut from_render_rx = from_render_rx.into_stream();
+	let mut from_converter_rx = from_converter_rx.into_stream();
+
 	while pages.is_empty() || pages.iter().any(|p| p.is_none()) {
 		tokio::select! {
-			Some(renderer_msg) = from_render_rx.recv() => {
+			Some(renderer_msg) = from_render_rx.next() => {
 				handle_renderer_msg(renderer_msg, &mut pages, &mut to_converter_tx);
 			},
-			Some(converter_msg) = from_converter_rx.recv() => {
+			Some(converter_msg) = from_converter_rx.next() => {
 				handle_converter_msg(converter_msg, &mut pages, &mut to_converter_tx);
 			}
 		}

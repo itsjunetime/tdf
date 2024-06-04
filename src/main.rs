@@ -41,6 +41,9 @@ impl std::error::Error for BadTermSizeStdin {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+	#[cfg(feature = "tracing")]
+	console_subscriber::init();
+
 	let file = std::env::args().nth(1).ok_or("Program requires a file to process")?;
 	let path = PathBuf::from_str(&file)?.canonicalize()?;
 
@@ -53,9 +56,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// calling thread::spawn) and that will cause a panic
 	let mut watcher = notify::recommended_watcher(move |_| {
 		// This shouldn't fail to send unless the receiver gets disconnected. If that's happened,
-		// then like the main thread has panicked or something, so it doesn't matter if this panics
-		// as well
-		watch_tx.send(renderer::RenderNotif::Reload).unwrap();
+		// then like the main thread has panicked or something, so it doesn't matter we don't
+		// handle the error here
+		_ = watch_tx.send(renderer::RenderNotif::Reload);
 	})?;
 
 	// We're making this nonrecursive 'cause we're just watching a single file, so there's nothing

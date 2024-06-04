@@ -1,6 +1,8 @@
-use cairo::{Antialias, Format};
+use std::thread;
+
+use cairo::{Antialias, Context, Format, Surface};
 use crossterm::terminal::WindowSize;
-use flume::{Receiver, Sender, TryRecvError};
+use flume::{Receiver, SendError, Sender, TryRecvError};
 use itertools::Itertools;
 use poppler::{Color, Document, FindFlags, Page, Rectangle, SelectionStyle};
 use ratatui::layout::Rect;
@@ -61,10 +63,10 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 // we're done.
 pub fn start_rendering(
 	path: String,
-	sender: Sender<Result<RenderInfo, RenderError>>,
+	mut sender: Sender<Result<RenderInfo, RenderError>>,
 	receiver: Receiver<RenderNotif>,
 	size: WindowSize
-) {
+) -> Result<(), SendError<Result<RenderInfo, RenderError>>> {
 	// first, wait 'til we get told what the current starting area is so that we can set it to
 	// know what to render to
 	let mut area;
@@ -79,17 +81,19 @@ pub fn start_rendering(
 	// set will still get highlighted in the reloaded doc
 	let mut search_term = None;
 
+	// And although the font size could theoretically change, we aren't accounting for that right
+	// now, so we just keep this out of the loop.
+	let col_w = size.width / size.columns;
+	let col_h = size.height / size.rows;
+
 	'reload: loop {
 		let doc = match Document::from_file(&path, None) {
-			Err(e) => {
-				sender.send(Err(RenderError::Doc(e))).unwrap();
-				return;
-			}
+			Err(e) => return sender.send(Err(RenderError::Doc(e))),
 			Ok(d) => d
 		};
 
 		let n_pages = doc.n_pages() as usize;
-		sender.send(Ok(RenderInfo::NumPages(n_pages))).unwrap();
+		sender.send(Ok(RenderInfo::NumPages(n_pages)))?;
 
 		// We're using this vec of bools to indicate which page numbers have already been rendered,
 		// to support people jumping to specific pages and having quick rendering results. We
@@ -168,6 +172,9 @@ pub fn start_rendering(
 						.map(|(idx, p)| (start_point - (idx + 1), p))
 				);
 
+			let area_w = area.width as f64 * col_w as f64;
+			let area_h = area.height as f64 * col_h as f64;
+
 			// we go through each page
 			for (num, rendered) in page_iter {
 				// we only want to continue if one of the following is met:
@@ -182,19 +189,20 @@ pub fn start_rendering(
 				// check if we've been told to change the area that we're rendering to,
 				// or if we're told to rerender
 				match receiver.try_recv() {
-					Err(TryRecvError::Disconnected) => panic!("disconnected :("),
+					// If it's disconnected, then the main loop is done, so we should just give up
+					Err(TryRecvError::Disconnected) => return Ok(()),
 					Ok(notif) => handle_notif!(notif),
 					Err(TryRecvError::Empty) => ()
 				};
 
-				// We know this is in range 'cause we're iterating over it
+				// We know this is in range 'cause we're iterating over it but we still just want
+				// to be safe
 				let Some(page) = doc.page(num as i32) else {
 					sender
 						.send(Err(RenderError::Render(format!(
 							"Couldn't get page {num} ({}) of doc?",
 							num as i32
-						))))
-						.unwrap();
+						))))?;
 					continue;
 				};
 
@@ -202,37 +210,51 @@ pub fn start_rendering(
 					rendered.successful && rendered.contained_term == Some(false);
 
 				// render the page
-				match render_single_page(
+				match render_single_page_to_ctx(
 					page,
-					area,
-					num,
 					&search_term,
 					rendered_with_no_results,
-					&size
+					(area_w, area_h)
 				) {
 					// If we've already rendered it just fine and we don't need to render it again,
 					// just continue. We're all good
 					Ok(None) => (),
 					// If that fn returned Some, that means it needed to be re-rendered for some
 					// reason or another, so we're sending it here
-					Ok(Some(img)) => {
-						// But we first need to store if we already rendered it correctly so that
-						// the next time we iterate through, it might see that we're already good
-						rendered.contained_term = Some(img.search_results > 0);
+					Ok(Some(ctx)) => {
+						// we make a potentially incorrect assumption here that writing the context
+						// to a png won't fail, and mark that it all rendered correctly here before
+						// spawning off the thread to do so and send it.
+						rendered.contained_term = Some(ctx.num_results > 0);
 						rendered.successful = true;
-						sender.send(Ok(RenderInfo::Page(img))).unwrap()
-					}
+
+						// if this is the page that the user is currently trying to look at, don't
+						// bother spawning off a thread to render it to a png - it'll only slow
+						// down the time til the user can see it (due to the overhead of creating a
+						// thread), but we still want to spawn threads to render the other pages
+						// since the effects of parallelizing that will be noticeable if the user
+						// tries to move through pages more quickly
+						if num == start_point {
+							render_ctx_to_png(ctx, &mut sender, (col_w, col_h), num)?;
+						} else {
+							let mut sender = sender.clone();
+							thread::spawn(move || {
+								render_ctx_to_png(ctx, &mut sender, (col_w, col_h), num)
+							});
+						}
+					},
 					// And if we got an error, then obviously we need to propagate that
-					Err(e) => sender.send(Err(RenderError::Render(e))).unwrap()
+					Err(e) => sender.send(Err(RenderError::Render(e)))?
 				}
 			}
+
 			// Then once we've rendered all these pages, wait until we get another notification
 			// that this doc needs to be reloaded
 			loop {
 				// This once returned None despite the main thing being still connected (I think, at
-				// last), so I'm just being safe here
+				// least), so I'm just being safe here
 				let Ok(msg) = receiver.recv() else {
-					return;
+					return Ok(());
 				};
 				handle_notif!(msg);
 			}
@@ -240,14 +262,31 @@ pub fn start_rendering(
 	}
 }
 
-fn render_single_page(
+struct RenderedContext {
+	surface: Surface,
+	num_results: usize,
+	surface_width: f64,
+	surface_height: f64
+}
+
+/// SAFETY: I think this is safe because, although the backing struct for `Surface` does contain
+/// pointers to like the cairo_backend_t struct that all the cairo stuff is using, that struct is
+/// basically just a vtable, so accessing it from multiple threads *should* be safe since we're
+/// just calling the same functions with different data. The only other thing it holds reference to
+/// is a `cairo_device_t`, but that seems to be thread-safe because it's managed through ref counts
+/// and a mutex. Also, as far as I can tell from reading the source code, write_to_png_stream (the
+/// only function we call on this struct) doesn't access the device at all, so we should be fine
+/// there.
+/// We want this to be Send so that we can delegate the png writing to a separate thread (since
+/// that's the thing that takes the most time, by far, in this app).
+unsafe impl Send for RenderedContext {}
+
+fn render_single_page_to_ctx(
 	page: Page,
-	area: Rect,
-	page_num: usize,
 	search_term: &Option<String>,
 	already_rendered_no_results: bool,
-	size: &WindowSize
-) -> Result<Option<PageInfo>, String> {
+	(area_w, area_h): (f64, f64),
+) -> Result<Option<RenderedContext>, String> {
 	let mut result_rects = search_term
 		.as_ref()
 		.map(|term| page.find_text_with_options(term, FindFlags::DEFAULT | FindFlags::MULTILINE))
@@ -259,11 +298,6 @@ fn render_single_page(
 		return Ok(None);
 	}
 
-	// First, get the font size; the number of pixels (width x height) per font character (I
-	// think; it's at least something like that) on this terminal screen.
-	let col_h = size.height / size.rows;
-	let col_w = size.width / size.columns;
-
 	// then, get the size of the page
 	let (p_width, p_height) = page.size();
 
@@ -272,9 +306,7 @@ fn render_single_page(
 
 	// Then we get the full pixel dimensions of the area provided to us, and the aspect ratio
 	// of that area
-	let area_full_h = (area.height * col_h) as f64;
-	let area_full_w = (area.width * col_w) as f64;
-	let area_aspect_ratio = area_full_w / area_full_h;
+	let area_aspect_ratio = area_w / area_h;
 
 	// and get the ratio that this page would have to be scaled by to fit perfectly within the
 	// area provided to us.
@@ -284,9 +316,9 @@ fn render_single_page(
 	// scale the height to fit perfectly. The dimension that _is not_ scaled to fit perfectly
 	// is scaled by the same factor as the dimension that _is_ scaled perfectly.
 	let scale_factor = if p_aspect_ratio > area_aspect_ratio {
-		area_full_w / p_width
+		area_w / p_width
 	} else {
-		area_full_h / p_height
+		area_h / p_height
 	};
 
 	let surface_width = p_width * scale_factor;
@@ -308,7 +340,7 @@ fn render_single_page(
 	.map_err(|e| format!("Couldn't create ImageSurface: {e}"))?;
 	surface.set_device_scale(scale_factor, scale_factor);
 
-	let ctx = cairo::Context::new(surface).map_err(|e| format!("Couldn't create Context: {e}"))?;
+	let ctx = Context::new(surface).map_err(|e| format!("Couldn't create Context: {e}"))?;
 
 	// The default background color of PDFs (at least, I think) is white, so we need to set
 	// that as the background color, then paint, then render.
@@ -344,21 +376,38 @@ fn render_single_page(
 		}
 	}
 
-	let mut img_data = Vec::with_capacity((surface_height * surface_width) as usize);
-	ctx.target()
-		.write_to_png(&mut img_data)
-		.map_err(|e| format!("Couldn't write surface to png: {e}"))?;
-
-	Ok(Some(PageInfo {
-		img_data: ImageData {
-			data: img_data,
-			area: Rect {
-				width: surface_width as u16 / col_w,
-				height: surface_height as u16 / col_h,
-				..Rect::default()
-			}
-		},
-		page: page_num,
-		search_results: num_results
+	Ok(Some(RenderedContext {
+		surface: ctx.target(),
+		num_results,
+		surface_width,
+		surface_height
 	}))
+}
+
+fn render_ctx_to_png(
+	ctx: RenderedContext,
+	sender: &mut Sender<Result<RenderInfo, RenderError>>,
+	(col_w, col_h): (u16, u16),
+	page: usize
+) -> Result<(), SendError<Result<RenderInfo, RenderError>>> {
+	let mut img_data = Vec::with_capacity((ctx.surface_height * ctx.surface_width) as usize);
+
+	match ctx.surface.write_to_png(&mut img_data) {
+		Err(e) => sender.send(Err(RenderError::Render(
+			format!("Couldn't write surface to png: {e}")
+		))),
+		Ok(()) => sender.send(Ok(RenderInfo::Page(PageInfo {
+			img_data: ImageData {
+				data: img_data,
+				area: Rect {
+					width: ctx.surface_width as u16 / col_w,
+					height: ctx.surface_height as u16 / col_h,
+					x: 0,
+					y: 0
+				}
+			},
+			page,
+			search_results: ctx.num_results
+		})))
+	}
 }

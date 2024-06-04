@@ -30,9 +30,16 @@ glib = "0.19.6"
 itertools = "*"
 flume = { version = "0.11.0", default-features = false, features = ["async"] }
 
+# for tracing with tokio-console
+console-subscriber = { version = "0.2.0", optional = true }
+
 [profile.production]
 inherits = "release"
 lto = "fat"
+
+[features]
+default = []
+tracing = ["tokio/tracing", "dep:console-subscriber"]
 
 [dev-dependencies]
 criterion = "0.5.1"

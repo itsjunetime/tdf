@@ -107,7 +107,8 @@ pub async fn run_conversion_loop(
 					continue 'outer;
 				}
 				Err(TryRecvError::Empty) => (),
-				Err(TryRecvError::Disconnected) => panic!("Disconnected :(")
+				// if it's disconnected, we're done. just return.
+				Err(TryRecvError::Disconnected) => return Ok(())
 			}
 
 			match next_page(&mut images, &mut picker, page, &mut iteration) {

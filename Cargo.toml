@@ -42,7 +42,7 @@ default = []
 tracing = ["tokio/tracing", "dep:console-subscriber"]
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = { version = "0.5.1", features = ["async_tokio"] }
 
 [[bench]]
 name = "rendering"

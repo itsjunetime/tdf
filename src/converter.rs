@@ -1,8 +1,8 @@
 use flume::{Receiver, SendError, Sender, TryRecvError};
+use futures_util::stream::StreamExt;
 use image::ImageFormat;
 use itertools::Itertools;
 use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
-use futures_util::stream::StreamExt;
 
 use crate::renderer::{fill_default, PageInfo, RenderError};
 
@@ -67,7 +67,7 @@ pub async fn run_conversion_loop(
 		// size for the area given, so to save ratatui the work of having to
 		// resize it, we tell them to crop it to fit.
 		let txt_img = picker
-			.new_protocol(dyn_img, img_area, Resize::Crop)
+			.new_protocol(dyn_img, img_area, Resize::None)
 			.map_err(|e| {
 				RenderError::Render(format!(
 					"Couldn't convert DynamicImage to ratatui image: {e}"

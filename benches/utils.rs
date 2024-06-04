@@ -2,21 +2,24 @@ use std::{hint::black_box, path::Path};
 
 use crossterm::terminal::WindowSize;
 use flume::{r#async::RecvStream, unbounded, Sender};
+use futures_util::stream::StreamExt as _;
 use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
-use tdf::{converter::{run_conversion_loop, ConvertedPage, ConverterMsg}, renderer::{fill_default, start_rendering, RenderError, RenderInfo, RenderNotif}};
-use futures_util::stream::StreamExt as _;
+use tdf::{
+	converter::{run_conversion_loop, ConvertedPage, ConverterMsg},
+	renderer::{fill_default, start_rendering, RenderError, RenderInfo, RenderNotif}
+};
 
 fn handle_renderer_msg(
 	msg: Result<RenderInfo, RenderError>,
 	pages: &mut Vec<Option<ConvertedPage>>,
-	to_converter_tx: &mut Sender<tdf::converter::ConverterMsg>,
+	to_converter_tx: &mut Sender<tdf::converter::ConverterMsg>
 ) {
 	match msg {
 		Ok(RenderInfo::NumPages(num)) => {
 			fill_default(pages, num);
 			to_converter_tx.send(ConverterMsg::NumPages(num)).unwrap();
-		},
+		}
 		Ok(RenderInfo::Page(info)) => to_converter_tx.send(ConverterMsg::AddImg(info)).unwrap(),
 		Err(e) => panic!("Got error from renderer: {e:?}")
 	}
@@ -32,13 +35,13 @@ fn handle_converter_msg(
 
 	pages[num] = Some(page);
 
-	let num_got = pages.iter()
-		.filter(|p| p.is_some())
-		.count();
+	let num_got = pages.iter().filter(|p| p.is_some()).count();
 
 	// we have to tell it to jump to a certain page so that it will actually render it (since
 	// it only renders fanning out from the page that we currently have selected)
-	to_converter_tx.send(ConverterMsg::GoToPage(num_got)).unwrap();
+	to_converter_tx
+		.send(ConverterMsg::GoToPage(num_got))
+		.unwrap();
 }
 
 struct RenderState {
@@ -66,9 +69,7 @@ fn start_all_rendering(path: impl AsRef<Path>) -> RenderState {
 		width: columns * font_size.0
 	};
 
-	std::thread::spawn(move || {
-		start_rendering(str_path, to_main_tx, from_main_rx, size)
-	});
+	std::thread::spawn(move || start_rendering(str_path, to_main_tx, from_main_rx, size));
 
 	let (to_converter_tx, from_main_rx) = unbounded();
 	let (to_main_tx, from_converter_rx) = unbounded();

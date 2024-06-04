@@ -198,11 +198,10 @@ pub fn start_rendering(
 				// We know this is in range 'cause we're iterating over it but we still just want
 				// to be safe
 				let Some(page) = doc.page(num as i32) else {
-					sender
-						.send(Err(RenderError::Render(format!(
-							"Couldn't get page {num} ({}) of doc?",
-							num as i32
-						))))?;
+					sender.send(Err(RenderError::Render(format!(
+						"Couldn't get page {num} ({}) of doc?",
+						num as i32
+					))))?;
 					continue;
 				};
 
@@ -242,7 +241,7 @@ pub fn start_rendering(
 								render_ctx_to_png(ctx, &mut sender, (col_w, col_h), num)
 							});
 						}
-					},
+					}
 					// And if we got an error, then obviously we need to propagate that
 					Err(e) => sender.send(Err(RenderError::Render(e)))?
 				}
@@ -285,7 +284,7 @@ fn render_single_page_to_ctx(
 	page: Page,
 	search_term: &Option<String>,
 	already_rendered_no_results: bool,
-	(area_w, area_h): (f64, f64),
+	(area_w, area_h): (f64, f64)
 ) -> Result<Option<RenderedContext>, String> {
 	let mut result_rects = search_term
 		.as_ref()
@@ -393,9 +392,9 @@ fn render_ctx_to_png(
 	let mut img_data = Vec::with_capacity((ctx.surface_height * ctx.surface_width) as usize);
 
 	match ctx.surface.write_to_png(&mut img_data) {
-		Err(e) => sender.send(Err(RenderError::Render(
-			format!("Couldn't write surface to png: {e}")
-		))),
+		Err(e) => sender.send(Err(RenderError::Render(format!(
+			"Couldn't write surface to png: {e}"
+		)))),
 		Ok(()) => sender.send(Ok(RenderInfo::Page(PageInfo {
 			img_data: ImageData {
 				data: img_data,

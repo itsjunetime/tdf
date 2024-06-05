@@ -27,12 +27,14 @@ pub enum RenderInfo {
 	Page(PageInfo)
 }
 
+#[derive(Clone)]
 pub struct PageInfo {
 	pub img_data: ImageData,
 	pub page: usize,
 	pub search_results: usize
 }
 
+#[derive(Clone)]
 pub struct ImageData {
 	pub data: Vec<u8>,
 	pub area: Rect

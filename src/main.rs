@@ -141,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let (to_converter, from_main) = flume::unbounded();
 	let (to_main, from_converter) = flume::unbounded();
 
-	tokio::spawn(run_conversion_loop(to_main, from_main, picker));
+	tokio::spawn(run_conversion_loop(to_main, from_main, picker, 20));
 
 	let file_name = path
 		.file_name()

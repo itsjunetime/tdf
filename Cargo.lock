@@ -379,6 +379,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cpuprofiler"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43f8479dbcfd2bbaa0c0c26779b913052b375981cdf533091f2127ea3d42e52b"
+dependencies = [
+ "error-chain",
+ "lazy_static",
+ "pkg-config",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -517,6 +528,16 @@ checksum = "534c5cf6194dfab3db3242765c03bbe257cf92f22b38f6bc0c58d59108a820ba"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "error-chain"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d2f06b9cac1506ece98fe3231e3cc9c4410ec3d5b1f24ae1c8946f0742cdefc"
+dependencies = [
+ "backtrace",
+ "version_check",
 ]
 
 [[package]]
@@ -1470,7 +1491,7 @@ dependencies = [
 [[package]]
 name = "ratatui-image"
 version = "1.0.0"
-source = "git+https://github.com/itsjunetime/ratatui-image.git?branch=vb64_on_personal#88876c749898cce7801379345eb4e0bc69111b8a"
+source = "git+https://github.com/itsjunetime/ratatui-image.git?branch=vb64_on_personal#8d368ca87c9b817811ba47d04d188a334e5da5a6"
 dependencies = [
  "base64 0.22.1",
  "dyn-clone",
@@ -1478,6 +1499,7 @@ dependencies = [
  "image",
  "rand",
  "ratatui",
+ "rayon",
  "rustix",
  "vb64",
 ]
@@ -1809,6 +1831,7 @@ version = "0.1.0"
 dependencies = [
  "cairo-rs",
  "console-subscriber",
+ "cpuprofiler",
  "criterion",
  "crossterm",
  "flume",

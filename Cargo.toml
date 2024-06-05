@@ -43,6 +43,7 @@ tracing = ["tokio/tracing", "dep:console-subscriber"]
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
+cpuprofiler = "0.0.4"
 
 [[bench]]
 name = "rendering"

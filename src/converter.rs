@@ -6,8 +6,6 @@ use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
 
 use crate::renderer::{fill_default, PageInfo, RenderError};
 
-const MAX_ITER: usize = 20;
-
 pub struct ConvertedPage {
 	pub page: Box<dyn Protocol>,
 	pub num: usize,
@@ -23,7 +21,8 @@ pub enum ConverterMsg {
 pub async fn run_conversion_loop(
 	sender: Sender<Result<ConvertedPage, RenderError>>,
 	receiver: Receiver<ConverterMsg>,
-	mut picker: Picker
+	mut picker: Picker,
+	prerender: usize
 ) -> Result<(), SendError<Result<ConvertedPage, RenderError>>> {
 	let mut images = vec![];
 	let mut page: usize = 0;
@@ -32,16 +31,17 @@ pub async fn run_conversion_loop(
 		images: &mut [Option<PageInfo>],
 		picker: &mut Picker,
 		page: usize,
-		iteration: &mut usize
+		iteration: &mut usize,
+		prerender: usize
 	) -> Result<Option<ConvertedPage>, RenderError> {
-		if images.is_empty() || *iteration >= MAX_ITER {
+		if images.is_empty() || *iteration >= prerender {
 			return Ok(None);
 		}
 
 		// This kinda mimics the way the renderer alternates between going above and below the
 		// current page (within the bounds of how many pages there are) until we've done 20
-		let idx_start = page.saturating_sub(MAX_ITER / 2);
-		let idx_end = idx_start.saturating_add(MAX_ITER).min(images.len());
+		let idx_start = page.saturating_sub(prerender / 2);
+		let idx_end = idx_start.saturating_add(prerender).min(images.len());
 
 		// then we go through all the indices available to us and find the first one that has an
 		// image available to steal
@@ -111,7 +111,7 @@ pub async fn run_conversion_loop(
 				Err(TryRecvError::Disconnected) => return Ok(())
 			}
 
-			match next_page(&mut images, &mut picker, page, &mut iteration) {
+			match next_page(&mut images, &mut picker, page, &mut iteration, prerender) {
 				Ok(None) => break,
 				Ok(Some(img)) => sender.send(Ok(img))?,
 				Err(e) => sender.send(Err(e))?

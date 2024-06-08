@@ -17,9 +17,10 @@ use utils::{
 	start_converting_loop, start_rendering_loop, RenderState
 };
 
-const FILES: [&str; 2] = [
+const FILES: [&str; 3] = [
+	"benches/adobe_example.pdf",
 	"benches/example_dictionary.pdf",
-	"benches/adobe_example.pdf"
+	"benches/geotopo.pdf"
 ];
 
 fn render_full(c: &mut Criterion) {
@@ -32,7 +33,7 @@ fn render_full(c: &mut Criterion) {
 }
 
 fn render_to_first_page(c: &mut Criterion) {
-	for file in &FILES[..1] {
+	for file in FILES {
 		c.bench_with_input(
 			BenchmarkId::new("render_first_page", file),
 			&file,
@@ -54,7 +55,7 @@ fn only_converting(c: &mut Criterion) {
 			&(all_rendered, file),
 			|b, (rendered, _)| {
 				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter(|| convert_all_files(rendered.clone()))
+					.iter_with_setup(|| rendered.clone(), |rendered| convert_all_files(rendered))
 			}
 		);
 	}
@@ -70,7 +71,7 @@ pub async fn render_first_page(path: impl AsRef<Path>) {
 	} = start_all_rendering(path);
 
 	// we only want to render until the first page is ready to be printed
-	while pages.is_empty() {
+	while pages.iter().all(|p| p.is_none()) {
 		tokio::select! {
 			Some(renderer_msg) = from_render_rx.next() => {
 				handle_renderer_msg(renderer_msg, &mut pages, &mut to_converter_tx);

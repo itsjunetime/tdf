@@ -31,7 +31,7 @@ itertools = "*"
 flume = { version = "0.11.0", default-features = false, features = ["async"] }
 
 # for tracing with tokio-console
-console-subscriber = { version = "0.2.0", optional = true }
+console-subscriber = { version = "0.3.0", optional = true }
 
 [profile.production]
 inherits = "release"

@@ -1,6 +1,6 @@
 [submodule "ratatui"]
 	path = ratatui
-	url = https://github.com/ratatui-org/ratatui
+	url = https://github.com/itsjunetime/ratatui
 [submodule "ratatui-image"]
 	path = ratatui-image
-	url = https://github.com/benjajaja/ratatui-image
+	url = https://github.com/itsjunetime/ratatui-image

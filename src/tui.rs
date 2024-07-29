@@ -478,6 +478,7 @@ impl Tui {
 					self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
 				_ => None
 			},
+			Event::Resize(_, _) => Some(InputAction::Redraw),
 			// One of these options is Event::Resize, and we don't care about that because
 			// we always check, regardless, if the available area for the images has
 			// changed.

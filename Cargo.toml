@@ -13,7 +13,7 @@ name = "tdf"
 name = "tdf"
 
 [dependencies]
-poppler-rs = { version = "0.24.0", default-features = false, features = ["v23_7"] }
+poppler-rs = { version = "0.24.1", default-features = false, features = ["v23_7"] }
 cairo-rs = { version = "0.20.0", default-features = false, features = ["png"] }
 # we're using this branch because it has significant performance fixes that I'm waiting on responses from the upstream devs to get upstreamed. See https://github.com/ratatui-org/ratatui/issues/1116
 ratatui = { git = "https://github.com/itsjunetime/ratatui.git" }
@@ -31,7 +31,7 @@ itertools = "*"
 flume = { version = "0.11.0", default-features = false, features = ["async"] }
 
 # for tracing with tokio-console
-console-subscriber = { version = "0.3.0", optional = true }
+console-subscriber = { version = "0.4.0", optional = true }
 
 [profile.production]
 inherits = "release"

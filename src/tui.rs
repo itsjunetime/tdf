@@ -84,7 +84,7 @@ impl Tui {
 			])
 			.horizontal_margin(2)
 			.vertical_margin(1)
-			.split(frame.size())
+			.split(frame.area())
 	}
 
 	// TODO: Make a way to fill the width of the screen with one page and scroll down to view it
@@ -185,7 +185,7 @@ impl Tui {
 
 		let mut img_area = main_area[1];
 
-		let size = frame.size();
+		let size = frame.area();
 		if size == self.last_render.rect {
 			// If we haven't resized (and haven't used the Rect as a way to mark that we need to
 			// resize this time), then go through every element in the buffer where any Image would

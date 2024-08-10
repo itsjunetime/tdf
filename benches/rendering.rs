@@ -55,7 +55,7 @@ fn only_converting(c: &mut Criterion) {
 			&(all_rendered, file),
 			|b, (rendered, _)| {
 				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter_with_setup(|| rendered.clone(), |rendered| convert_all_files(rendered))
+					.iter_with_setup(|| rendered.clone(), convert_all_files)
 			}
 		);
 	}

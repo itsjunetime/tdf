@@ -14,7 +14,7 @@ impl Widget for Skip {
 	fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
 		for x in area.x..(area.x + area.width) {
 			for y in area.y..(area.y + area.height) {
-				buf.get_mut(x, y).skip = self.skip;
+				buf[(x, y)].skip = self.skip;
 			}
 		}
 	}

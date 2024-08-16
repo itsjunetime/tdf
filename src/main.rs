@@ -197,13 +197,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			},
 			Some(renderer_msg) = tui_rx.next() => {
 				match renderer_msg {
-					Ok(RenderInfo::NumPages(num)) => {
-						tui.set_n_pages(num);
-						to_converter.send(ConverterMsg::NumPages(num))?;
-					},
-					Ok(RenderInfo::Page(info)) => {
-						tui.got_num_results_on_page(info.page, info.search_results);
-						to_converter.send(ConverterMsg::AddImg(info))?;
+					// if an Ok comes through, we know the error has been resolved ('cause it kinda
+					// bails whenever we run into an error) so just clear it
+					Ok(render_info) => {
+						match render_info {
+							RenderInfo::NumPages(num) => {
+								tui.set_n_pages(num);
+								to_converter.send(ConverterMsg::NumPages(num))?;
+							},
+							RenderInfo::Page(info) => {
+								tui.got_num_results_on_page(info.page, info.search_results);
+								to_converter.send(ConverterMsg::AddImg(info))?;
+							},
+						}
+						tui.set_bottom_msg(None);
 					},
 					Err(e) => tui.show_error(e),
 				}

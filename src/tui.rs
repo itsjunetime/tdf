@@ -37,7 +37,7 @@ struct LastRender {
 }
 
 #[derive(Default)]
-enum BottomMessage {
+pub enum BottomMessage {
 	#[default]
 	Help,
 	SearchResults(String),
@@ -45,7 +45,7 @@ enum BottomMessage {
 	Input(InputCommand)
 }
 
-enum InputCommand {
+pub enum InputCommand {
 	GoToPage(usize),
 	Search(String)
 }
@@ -503,7 +503,7 @@ impl Tui {
 
 	// We have `msg` as optional so that if they reset it to none, it'll replace it with
 	// `prev_msg`, but if they reset it to something else, it'll put the current thing in prev_msg
-	fn set_bottom_msg(&mut self, msg: Option<BottomMessage>) {
+	pub fn set_bottom_msg(&mut self, msg: Option<BottomMessage>) {
 		match msg {
 			Some(mut msg) => {
 				std::mem::swap(&mut self.bottom_msg, &mut msg);

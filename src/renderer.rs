@@ -90,7 +90,21 @@ pub fn start_rendering(
 
 	'reload: loop {
 		let doc = match Document::from_file(&path, None) {
-			Err(e) => return sender.send(Err(RenderError::Doc(e))),
+			Err(e) => {
+				// if there's an error, tell the main loop
+				sender.send(Err(RenderError::Doc(e)))?;
+				// then wait for a reload notif (since what probably happened is that the file was
+				// temporarily removed to facilitate a save or something like that)
+				while let Ok(msg) = receiver.recv() {
+					// and once that comes, just try to reload again
+					if let RenderNotif::Reload = msg {
+						continue 'reload;
+					}
+				}
+				// if that while let Ok ever fails and we exit out of that loop, the main thread is
+				// done, so we're fine to just return
+				return Ok(());
+			}
 			Ok(d) => d
 		};
 

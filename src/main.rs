@@ -49,7 +49,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.ok_or("Program requires a file to process")?;
 	let path = PathBuf::from_str(&file)?.canonicalize()?;
 
-	//let (watch_tx, render_rx) = tokio::sync::mpsc::unbounded_channel();
 	let (watch_tx, render_rx) = flume::unbounded();
 	let tui_tx = watch_tx.clone();
 
@@ -95,9 +94,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		if input_line.starts_with("\x1b[4;") {
 			// it should input it to us as `\e[4;<height>;<width>t`, so we need to split to get the h/w
-			let mut splits = input_line.split([';', 't']);
 			// ignore the first val
-			_ = splits.next();
+			let mut splits = input_line.split([';', 't']).skip(1);
 
 			window_size.height = splits
 				.next()

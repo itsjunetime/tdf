@@ -287,10 +287,9 @@ impl Tui {
 	}
 
 	pub fn set_n_pages(&mut self, n_pages: usize) {
-		self.rendered = Vec::with_capacity(n_pages);
-		for _ in 0..n_pages {
-			self.rendered.push(RenderedInfo::default());
-		}
+		self.rendered = std::iter::from_fn(|| Some(RenderedInfo::default()))
+			.take(n_pages)
+			.collect();
 		self.page = self.page.min(n_pages - 1);
 	}
 
@@ -479,9 +478,6 @@ impl Tui {
 				_ => None
 			},
 			Event::Resize(_, _) => Some(InputAction::Redraw),
-			// One of these options is Event::Resize, and we don't care about that because
-			// we always check, regardless, if the available area for the images has
-			// changed.
 			_ => None
 		}
 	}

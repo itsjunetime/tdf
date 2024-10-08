@@ -22,8 +22,6 @@ If it turns out that you're missing one of these, it will fail to compile and te
 2. Clone the repo and `cd` into it
 3. Run `cargo build --release`
 
-Alternatively, if you'd like to squeeze the most performance out of this tool, you'll want to run `bash ./scripts/build_most_optimized.sh` and pull the resulting binary from `./target/$target/tdf`.
-
 ## Why in the world would you use this?
 
 I dunno. Just for fun, mostly.

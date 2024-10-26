@@ -16,6 +16,7 @@ pub enum RenderNotif {
 
 #[derive(Debug)]
 pub enum RenderError {
+	Notify(notify::Error),
 	Doc(glib::Error),
 	// Don't like storing an error as a string but it needs to be Send to send to the main thread,
 	// and it's just going to be shown to the user, so whatever

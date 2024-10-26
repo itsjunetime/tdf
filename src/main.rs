@@ -16,10 +16,10 @@ use crossterm::{
 };
 use futures_util::{stream::StreamExt, FutureExt};
 use glib::{LogField, LogLevel, LogWriterOutput};
-use notify::{RecursiveMode, Watcher};
+use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
-use renderer::{RenderInfo, RenderNotif};
+use renderer::{RenderError, RenderInfo, RenderNotif};
 use tui::{InputAction, Tui};
 
 mod converter;
@@ -52,14 +52,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let (watch_tx, render_rx) = flume::unbounded();
 	let tui_tx = watch_tx.clone();
 
+	let (render_tx, tui_rx) = flume::unbounded();
+	let watch_to_tui_tx = render_tx.clone();
+
 	// we need to call this outside the recommended_watcher call because if we call it inside, that
 	// will be calling it from a thread not owned by the tokio runtime (since it's created by
 	// calling thread::spawn) and that will cause a panic
-	let mut watcher = notify::recommended_watcher(move |_| {
-		// This shouldn't fail to send unless the receiver gets disconnected. If that's happened,
-		// then like the main thread has panicked or something, so it doesn't matter we don't
-		// handle the error here
-		_ = watch_tx.send(renderer::RenderNotif::Reload);
+	let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| match res {
+		// If we get an error here, and then an error sending, everything's going wrong. Just give
+		// up lol.
+		Err(e) => watch_to_tui_tx.send(Err(RenderError::Notify(e))).unwrap(),
+		// TODO: Should we match EventKind::Rename and propogate that so that the other parts of the
+		// process know that too? Or should that be
+		Ok(ev) => match ev.kind {
+			EventKind::Access(_) => (),
+			EventKind::Remove(_) =>
+				drop(watch_to_tui_tx.send(Err(RenderError::Render("File was deleted".into())))),
+			// This shouldn't fail to send unless the receiver gets disconnected. If that's
+			// happened, then like the main thread has panicked or something, so it doesn't matter
+			// we don't handle the error here.
+			EventKind::Other | EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) =>
+				drop(watch_tx.send(renderer::RenderNotif::Reload)),
+		}
 	})?;
 
 	// We're making this nonrecursive 'cause we're just watching a single file, so there's nothing
@@ -67,7 +81,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	watcher.watch(&path, RecursiveMode::NonRecursive)?;
 
 	let file_path = format!("file://{}", path.clone().into_os_string().to_string_lossy());
-	let (render_tx, tui_rx) = flume::unbounded();
 
 	let mut window_size = window_size()?;
 

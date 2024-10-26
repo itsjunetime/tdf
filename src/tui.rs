@@ -484,6 +484,7 @@ impl Tui {
 
 	pub fn show_error(&mut self, err: RenderError) {
 		self.set_bottom_msg(Some(BottomMessage::Error(match err {
+			RenderError::Notify(e) => format!("Auto-reload failed: {e}"),
 			RenderError::Doc(e) => format!("Couldn't open document: {e}"),
 			RenderError::Render(e) => format!("Couldn't render page: {e}")
 		})));

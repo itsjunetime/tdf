@@ -1,8 +1,16 @@
 [package]
 name = "tdf"
 version = "0.1.0"
+authors = ["June Welker <junewelker@gmail.com>"]
 edition = "2021"
+description = "A terminal viewer for PDFs"
+readme = "README.md"
+homepage = "https://github.com/itsjunetime/tdf"
+repository = "https://github.com/itsjunetime/tdf"
 license = "MPL-2.0"
+license-file = "LICENSE"
+keywords = ["pdf", "tui", "cli", "terminal"]
+categories = ["command-line-utilities", "text-processing", "visualization"]
 default-run = "tdf"
 
 [[bin]]

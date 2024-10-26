@@ -65,7 +65,7 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 // means the other side's disconnected, which means that the main thread has panicked, which means
 // we're done.
 pub fn start_rendering(
-	path: String,
+	path: &str,
 	mut sender: Sender<Result<RenderInfo, RenderError>>,
 	receiver: Receiver<RenderNotif>,
 	size: WindowSize
@@ -90,7 +90,7 @@ pub fn start_rendering(
 	let col_h = size.height / size.rows;
 
 	'reload: loop {
-		let doc = match Document::from_file(&path, None) {
+		let doc = match Document::from_file(path, None) {
 			Err(e) => {
 				// if there's an error, tell the main loop
 				sender.send(Err(RenderError::Doc(e)))?;
@@ -189,8 +189,8 @@ pub fn start_rendering(
 						.map(|(idx, p)| (start_point - (idx + 1), p))
 				);
 
-			let area_w = area.width as f64 * col_w as f64;
-			let area_h = area.height as f64 * col_h as f64;
+			let area_w = f64::from(area.width) * f64::from(col_w);
+			let area_h = f64::from(area.height) * f64::from(col_h);
 
 			// we go through each page
 			for (num, rendered) in page_iter {

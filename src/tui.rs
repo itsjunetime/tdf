@@ -204,7 +204,7 @@ impl Tui {
 				// and only take as many as are ready to be rendered
 				.take_while(|(_, page)| page.img.is_some())
 				// and map it to their width (in cells on the terminal, not pixels)
-				.flat_map(|(idx, page)| page.img.as_ref().map(|img| (idx, img.rect().width)))
+				.filter_map(|(idx, page)| page.img.as_ref().map(|img| (idx, img.rect().width)))
 				// and then take them as long as they won't overflow the available area.
 				.take_while(|(_, width)| match test_area_w.checked_sub(*width) {
 					Some(new_val) => {

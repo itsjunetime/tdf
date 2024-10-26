@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		// read in the returned size until we hit a 't' (which indicates to us it's done)
 		let input_vec = std::io::stdin()
 			.bytes()
-			.flat_map(|b| b.ok())
+			.filter_map(Result::ok)
 			.take_while(|b| *b != b't')
 			.collect::<Vec<_>>();
 
@@ -144,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// We need to use the thread::spawn API so that this exists in a thread not owned by tokio,
 	// since the methods we call in `start_rendering` will panic if called in an async context
 	std::thread::spawn(move || {
-		renderer::start_rendering(file_path, render_tx, render_rx, window_size)
+		renderer::start_rendering(&file_path, render_tx, render_rx, window_size)
 	});
 
 	let mut ev_stream = crossterm::event::EventStream::new();
@@ -154,11 +154,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	tokio::spawn(run_conversion_loop(to_main, from_main, picker, 20));
 
-	let file_name = path
-		.file_name()
-		.map(|n| n.to_string_lossy())
-		.unwrap_or_else(|| "Unknown file".into())
-		.to_string();
+	let file_name = path.file_name().map_or_else(
+		|| "Unknown file".into(),
+		|n| n.to_string_lossy().to_string()
+	);
 	let mut tui = tui::Tui::new(file_name);
 
 	let backend = CrosstermBackend::new(std::io::stdout());

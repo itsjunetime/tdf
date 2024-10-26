@@ -75,7 +75,7 @@ pub fn start_rendering_loop(
 		width: columns * FONT_SIZE.0
 	};
 
-	std::thread::spawn(move || start_rendering(str_path, to_main_tx, from_main_rx, size));
+	std::thread::spawn(move || start_rendering(&str_path, to_main_tx, from_main_rx, size));
 
 	let main_area = Rect {
 		x: 0,
@@ -136,7 +136,7 @@ pub async fn render_doc(path: impl AsRef<Path>) {
 		to_render_tx
 	} = start_all_rendering(path);
 
-	while pages.is_empty() || pages.iter().any(|p| p.is_none()) {
+	while pages.is_empty() || pages.iter().any(Option::is_none) {
 		tokio::select! {
 			Some(renderer_msg) = from_render_rx.next() => {
 				handle_renderer_msg(renderer_msg, &mut pages, &mut to_converter_tx);

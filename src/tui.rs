@@ -1,4 +1,4 @@
-use std::{io::stdout, rc::Rc};
+use std::{io::stdout, num::NonZeroUsize, rc::Rc};
 
 use crossterm::{
 	event::{Event, KeyCode, MouseEventKind},
@@ -24,7 +24,8 @@ pub struct Tui {
 	// we use `prev_msg` to, for example, restore the 'search results' message on the bottom after
 	// jumping to a specific page
 	prev_msg: Option<BottomMessage>,
-	rendered: Vec<RenderedInfo>
+	rendered: Vec<RenderedInfo>,
+	page_constraints: PageConstraints
 }
 
 #[derive(Default, Debug)]
@@ -50,6 +51,11 @@ pub enum InputCommand {
 	Search(String)
 }
 
+struct PageConstraints {
+	max_wide: Option<NonZeroUsize>,
+	r_to_l: bool
+}
+
 // This seems like a kinda weird struct because it holds two optionals but any representation
 // within it is valid; I think it's the best way to represent it
 #[derive(Default)]
@@ -64,14 +70,15 @@ struct RenderedInfo {
 }
 
 impl Tui {
-	pub fn new(name: String) -> Tui {
+	pub fn new(name: String, max_wide: Option<NonZeroUsize>, r_to_l: bool) -> Tui {
 		Self {
 			name,
 			page: 0,
 			prev_msg: None,
 			bottom_msg: BottomMessage::Help,
 			last_render: LastRender::default(),
-			rendered: vec![]
+			rendered: vec![],
+			page_constraints: PageConstraints { max_wide, r_to_l }
 		}
 	}
 
@@ -196,13 +203,19 @@ impl Tui {
 			// here we calculate how many pages can fit in the available area.
 			let mut test_area_w = img_area.width;
 			// go through our pages, starting at the first one we want to view
-			let page_widths = self.rendered[self.page..]
+			let mut page_widths = self.rendered[self.page..]
 				.iter()
 				// and get their indices (I know it's offset, we fix it down below when we actually
 				// render each page)
 				.enumerate()
 				// and only take as many as are ready to be rendered
-				.take_while(|(_, page)| page.img.is_some())
+				.take_while(|(idx, page)| {
+					let mut take = page.img.is_some();
+					if let Some(max) = self.page_constraints.max_wide {
+						take &= *idx < max.get();
+					}
+					take
+				})
 				// and map it to their width (in cells on the terminal, not pixels)
 				.filter_map(|(idx, page)| page.img.as_ref().map(|img| (idx, img.rect().width)))
 				// and then take them as long as they won't overflow the available area.
@@ -214,6 +227,10 @@ impl Tui {
 					None => false
 				})
 				.collect::<Vec<_>>();
+
+			if self.page_constraints.r_to_l {
+				page_widths.reverse();
+			}
 
 			if page_widths.is_empty() {
 				// If none are ready to render, just show the loading thing
@@ -268,11 +285,22 @@ impl Tui {
 		frame.render_widget(loading_span, inner_space[0]);
 	}
 
-	fn change_page(&mut self, change: PageChange, amt: ChangeAmount) -> Option<InputAction> {
+	fn change_page(&mut self, mut change: PageChange, amt: ChangeAmount) -> Option<InputAction> {
 		let diff = match amt {
 			ChangeAmount::Single => 1,
 			ChangeAmount::WholeScreen => self.last_render.pages_shown
 		};
+
+		// This is a kinda weird way to switch around the controls for this sort of thing but it
+		// allows it to be pretty centralized and avoids annoyingly duplicated match arms (since
+		// we'd have to do `match key { 'h' if r_to_l | 'l' => {}}` and that doesn't play well with
+		// `if` guards on match arms)
+		if self.page_constraints.r_to_l {
+			change = match change {
+				PageChange::Next => PageChange::Prev,
+				PageChange::Prev => PageChange::Next
+			};
+		}
 
 		let old = self.page;
 		match change {
@@ -323,7 +351,7 @@ impl Tui {
 		self.rendered[page_num].num_results = Some(num_results);
 	}
 
-	pub fn handle_event(&mut self, ev: Event) -> Option<InputAction> {
+	pub fn handle_event(&mut self, ev: &Event) -> Option<InputAction> {
 		fn jump_to_page(
 			page: &mut usize,
 			rect: &mut Rect,
@@ -522,11 +550,13 @@ pub enum InputAction {
 	QuitApp
 }
 
+#[derive(Copy, Clone)]
 enum PageChange {
 	Prev,
 	Next
 }
 
+#[derive(Copy, Clone)]
 enum ChangeAmount {
 	WholeScreen,
 	Single

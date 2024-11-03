@@ -2,8 +2,8 @@
 
 use std::{
 	io::{stdout, Read, Write},
-	path::PathBuf,
-	str::FromStr
+	num::NonZeroUsize,
+	path::PathBuf
 };
 
 use converter::{run_conversion_loop, ConvertedPage, ConverterMsg};
@@ -44,42 +44,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	#[cfg(feature = "tracing")]
 	console_subscriber::init();
 
-	let file = std::env::args()
-		.nth(1)
-		.ok_or("Program requires a file to process")?;
-	let path = PathBuf::from_str(&file)?.canonicalize()?;
+	let flags = xflags::parse_or_exit! {
+		/// Display the pdf with the pages starting at the right hand size and moving left and
+		/// adjust input keys to match
+		optional -r,--r-to-l r_to_l: bool
+		/// The maximum number of pages to display together, horizontally, at a time
+		optional -m,--max-wide max_wide: NonZeroUsize
+		/// PDF file to read
+		required file: PathBuf
+	};
 
-	let (watch_tx, render_rx) = flume::unbounded();
-	let tui_tx = watch_tx.clone();
+	let path = flags.file.canonicalize()?;
+
+	let (watch_to_render_tx, render_rx) = flume::unbounded();
+	let tui_tx = watch_to_render_tx.clone();
 
 	let (render_tx, tui_rx) = flume::unbounded();
 	let watch_to_tui_tx = render_tx.clone();
 
-	// we need to call this outside the recommended_watcher call because if we call it inside, that
-	// will be calling it from a thread not owned by the tokio runtime (since it's created by
-	// calling thread::spawn) and that will cause a panic
-	let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| match res {
-		// If we get an error here, and then an error sending, everything's going wrong. Just give
-		// up lol.
-		Err(e) => watch_to_tui_tx.send(Err(RenderError::Notify(e))).unwrap(),
-		// TODO: Should we match EventKind::Rename and propogate that so that the other parts of the
-		// process know that too? Or should that be
-		Ok(ev) => match ev.kind {
-			EventKind::Access(_) => (),
-			EventKind::Remove(_) =>
-				drop(watch_to_tui_tx.send(Err(RenderError::Render("File was deleted".into())))),
-			// This shouldn't fail to send unless the receiver gets disconnected. If that's
-			// happened, then like the main thread has panicked or something, so it doesn't matter
-			// we don't handle the error here.
-			EventKind::Other | EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) =>
-				drop(watch_tx.send(renderer::RenderNotif::Reload)),
-		}
-	})?;
+	let mut watcher =
+		notify::recommended_watcher(on_notify_ev(watch_to_tui_tx, watch_to_render_tx))?;
 
 	// We're making this nonrecursive 'cause we're just watching a single file, so there's nothing
 	// to recurse into
 	watcher.watch(&path, RecursiveMode::NonRecursive)?;
 
+	// TODO: Handle non-utf8 file names? Maybe by constructing a CString and passing that in to the
+	// poppler stuff instead of a rust string?
 	let file_path = format!("file://{}", path.clone().into_os_string().to_string_lossy());
 
 	let mut window_size = window_size()?;
@@ -158,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		|| "Unknown file".into(),
 		|n| n.to_string_lossy().to_string()
 	);
-	let mut tui = tui::Tui::new(file_name);
+	let mut tui = tui::Tui::new(file_name, flags.max_wide, flags.r_to_l.unwrap_or_default());
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend)?;
@@ -183,25 +174,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut from_converter = from_converter.into_stream();
 
 	loop {
-		let mut needs_redraw = tokio::select! {
+		let mut needs_redraw = true;
+		tokio::select! {
 			// First we check if we have any keystrokes
 			Some(ev) = ev_stream.next().fuse() => {
 				// If we can't get user input, just crash.
 				let ev = ev.expect("Couldn't get any user input");
 
-				match tui.handle_event(ev) {
-					None => false,
-					Some(action) => {
-						match action {
-							InputAction::Redraw => (),
-							InputAction::QuitApp => break,
-							InputAction::JumpingToPage(page) => {
-								tui_tx.send(RenderNotif::JumpToPage(page))?;
-								to_converter.send(ConverterMsg::GoToPage(page))?;
-							},
-							InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term))?,
-						};
-						true
+				match tui.handle_event(&ev) {
+					None => needs_redraw = false,
+					Some(action) => match action {
+						InputAction::Redraw => (),
+						InputAction::QuitApp => break,
+						InputAction::JumpingToPage(page) => {
+							tui_tx.send(RenderNotif::JumpToPage(page))?;
+							to_converter.send(ConverterMsg::GoToPage(page))?;
+						},
+						InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term))?,
 					}
 				}
 			},
@@ -224,14 +213,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 					},
 					Err(e) => tui.show_error(e),
 				}
-				true
 			}
 			Some(img_res) = from_converter.next() => {
 				match img_res {
 					Ok(ConvertedPage { page, num, num_results }) => tui.page_ready(page, num, num_results),
 					Err(e) => tui.show_error(e),
 				}
-				true
 			},
 		};
 
@@ -258,6 +245,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	disable_raw_mode()?;
 
 	Ok(())
+}
+
+fn on_notify_ev(
+	to_tui_tx: flume::Sender<Result<RenderInfo, RenderError>>,
+	to_render_tx: flume::Sender<RenderNotif>
+) -> impl Fn(notify::Result<Event>) {
+	move |res| match res {
+		// If we get an error here, and then an error sending, everything's going wrong. Just give
+		// up lol.
+		Err(e) => to_tui_tx.send(Err(RenderError::Notify(e))).unwrap(),
+		// TODO: Should we match EventKind::Rename and propogate that so that the other parts of the
+		// process know that too? Or should that be
+		Ok(ev) => match ev.kind {
+			EventKind::Access(_) => (),
+			EventKind::Remove(_) =>
+				drop(to_tui_tx.send(Err(RenderError::Render("File was deleted".into())))),
+			// This shouldn't fail to send unless the receiver gets disconnected. If that's
+			// happened, then like the main thread has panicked or something, so it doesn't matter
+			// we don't handle the error here.
+			EventKind::Other | EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) =>
+				drop(to_render_tx.send(renderer::RenderNotif::Reload)),
+		}
+	}
 }
 
 fn noop(_: LogLevel, _: &[LogField<'_>]) -> LogWriterOutput {

@@ -64,6 +64,10 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 // Also we just kinda 'unwrap' all of the send/recv calls here 'cause if they return an error, that
 // means the other side's disconnected, which means that the main thread has panicked, which means
 // we're done.
+// We're allowing passing by value here because this is only called once, at the beginning of the
+// program, and the arguments that 'should' be passed by value (`receiver` and `size`) would
+// probably be more performant if accessed by-value instead of through a reference. Probably.
+#[allow(clippy::needless_pass_by_value)]
 pub fn start_rendering(
 	path: &str,
 	mut sender: Sender<Result<RenderInfo, RenderError>>,
@@ -227,8 +231,8 @@ pub fn start_rendering(
 
 				// render the page
 				match render_single_page_to_ctx(
-					page,
-					&search_term,
+					&page,
+					search_term.as_deref(),
 					rendered_with_no_results,
 					(area_w, area_h)
 				) {
@@ -251,11 +255,11 @@ pub fn start_rendering(
 						// since the effects of parallelizing that will be noticeable if the user
 						// tries to move through pages more quickly
 						if num == start_point {
-							render_ctx_to_png(ctx, &mut sender, (col_w, col_h), num)?;
+							render_ctx_to_png(&ctx, &mut sender, (col_w, col_h), num)?;
 						} else {
 							let mut sender = sender.clone();
 							thread::spawn(move || {
-								render_ctx_to_png(ctx, &mut sender, (col_w, col_h), num)
+								render_ctx_to_png(&ctx, &mut sender, (col_w, col_h), num)
 							});
 						}
 					}
@@ -298,8 +302,8 @@ struct RenderedContext {
 unsafe impl Send for RenderedContext {}
 
 fn render_single_page_to_ctx(
-	page: Page,
-	search_term: &Option<String>,
+	page: &Page,
+	search_term: Option<&str>,
 	already_rendered_no_results: bool,
 	(area_w, area_h): (f64, f64)
 ) -> Result<Option<RenderedContext>, String> {
@@ -375,7 +379,7 @@ fn render_single_page_to_ctx(
 		highlight_color.set_green((u16::MAX / 5) * 4);
 
 		let mut old_rect = Rectangle::new();
-		for rect in result_rects.iter_mut() {
+		for rect in &mut result_rects {
 			// According to https://gitlab.freedesktop.org/poppler/poppler/-/issues/763, these rects
 			// need to be corrected since they use different references as the y-coordinate base
 			rect.set_y1(p_height - rect.y1());
@@ -401,7 +405,7 @@ fn render_single_page_to_ctx(
 }
 
 fn render_ctx_to_png(
-	ctx: RenderedContext,
+	ctx: &RenderedContext,
 	sender: &mut Sender<Result<RenderInfo, RenderError>>,
 	(col_w, col_h): (u16, u16),
 	page: usize

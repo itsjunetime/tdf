@@ -61,7 +61,7 @@ struct PageConstraints {
 #[derive(Default)]
 struct RenderedInfo {
 	// The image, if it has been rendered by `Converter` to that struct
-	img: Option<Box<dyn Protocol>>,
+	img: Option<Protocol>,
 	// The number of results for the current search term that have been found on this page. None if
 	// we haven't checked this page yet
 	// Also this isn't the most efficient representation of this value, but it's accurate, so like
@@ -217,7 +217,7 @@ impl Tui {
 					take
 				})
 				// and map it to their width (in cells on the terminal, not pixels)
-				.filter_map(|(idx, page)| page.img.as_ref().map(|img| (idx, img.rect().width)))
+				.filter_map(|(idx, page)| page.img.as_ref().map(|img| (idx, img_area.width)))
 				// and then take them as long as they won't overflow the available area.
 				.take_while(|(_, width)| match test_area_w.checked_sub(*width) {
 					Some(new_val) => {
@@ -269,7 +269,7 @@ impl Tui {
 
 	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
 		match self.rendered[page_idx].img {
-			Some(ref page_img) => frame.render_widget(Image::new(&**page_img), img_area),
+			Some(ref page_img) => frame.render_widget(Image::new(page_img), img_area),
 			None => Self::render_loading_in(frame, img_area)
 		};
 	}
@@ -321,22 +321,22 @@ impl Tui {
 		self.page = self.page.min(n_pages - 1);
 	}
 
-	pub fn page_ready(&mut self, img: Box<dyn Protocol>, page_num: usize, num_results: usize) {
+	pub fn page_ready(&mut self, img: Protocol, page_num: usize, num_results: usize) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
 		// the last rect marker so that all images are forced to redraw on next render and this one
 		// is drawn with them
-		if page_num >= self.page && page_num <= self.page + self.last_render.pages_shown {
-			self.last_render.rect = Rect::default();
-		} else {
-			let img_w = img.rect().width;
-			if img_w <= self.last_render.unused_width {
-				let num_fit = self.last_render.unused_width / img_w;
-				if page_num >= self.page && (self.page + num_fit as usize) >= page_num {
-					self.last_render.rect = Rect::default();
-				}
-			}
-		}
+		// if page_num >= self.page && page_num <= self.page + self.last_render.pages_shown {
+		// 	self.last_render.rect = Rect::default();
+		// } else {
+		// 	let img_w = img.
+		// 	if img_w <= self.last_render.unused_width {
+		// 		let num_fit = self.last_render.unused_width / img_w;
+		// 		if page_num >= self.page && (self.page + num_fit as usize) >= page_num {
+		// 			self.last_render.rect = Rect::default();
+		// 		}
+		// 	}
+		// }
 
 		// We always just set this here because we handle reloading in the `set_n_pages` function.
 		// If the document was reloaded, then It'll have the `set_n_pages` called to set the new

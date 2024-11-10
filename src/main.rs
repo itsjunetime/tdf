@@ -125,11 +125,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,
 	// it messes up something with user input. Input never makes it to the crossterm thing
-	let mut picker = Picker::new((
+	let picker = Picker::from_fontsize((
 		window_size.width / window_size.columns,
 		window_size.height / window_size.rows
 	));
-	picker.guess_protocol();
+	// picker.protocol_type(); // TODO: Had to get rid of this
 
 	// then we want to spawn off the rendering task
 	// We need to use the thread::spawn API so that this exists in a thread not owned by tokio,
@@ -153,7 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend)?;
-	term.skip_diff(true);
+	// term.skip_diff(true); // TODO: Had to get rid of this
 
 	// poppler has some annoying logging (e.g. if you request a page index out-of-bounds of a
 	// document's pages, then it will return `None`, but still log to stderr with CRITICAL level),

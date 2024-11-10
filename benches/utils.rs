@@ -98,8 +98,8 @@ pub fn start_converting_loop(
 	let (to_converter_tx, from_main_rx) = unbounded();
 	let (to_main_tx, from_converter_rx) = unbounded();
 
-	let mut picker = Picker::new(FONT_SIZE);
-	picker.protocol_type = ProtocolType::Kitty;
+	let mut picker = Picker::from_fontsize(FONT_SIZE);
+	picker.set_protocol_type(ProtocolType::Kitty);
 
 	tokio::spawn(run_conversion_loop(
 		to_main_tx,

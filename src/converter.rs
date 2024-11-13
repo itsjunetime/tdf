@@ -7,7 +7,7 @@ use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
 use crate::renderer::{fill_default, PageInfo, RenderError};
 
 pub struct ConvertedPage {
-	pub page: Box<dyn Protocol>,
+	pub page: Protocol,
 	pub num: usize,
 	pub num_results: usize
 }

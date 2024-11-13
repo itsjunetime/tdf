@@ -61,7 +61,7 @@ struct PageConstraints {
 #[derive(Default)]
 struct RenderedInfo {
 	// The image, if it has been rendered by `Converter` to that struct
-	img: Option<Box<dyn Protocol>>,
+	img: Option<Protocol>,
 	// The number of results for the current search term that have been found on this page. None if
 	// we haven't checked this page yet
 	// Also this isn't the most efficient representation of this value, but it's accurate, so like
@@ -269,7 +269,7 @@ impl Tui {
 
 	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
 		match self.rendered[page_idx].img {
-			Some(ref page_img) => frame.render_widget(Image::new(&**page_img), img_area),
+			Some(ref page_img) => frame.render_widget(Image::new(page_img), img_area),
 			None => Self::render_loading_in(frame, img_area)
 		};
 	}
@@ -321,7 +321,7 @@ impl Tui {
 		self.page = self.page.min(n_pages - 1);
 	}
 
-	pub fn page_ready(&mut self, img: Box<dyn Protocol>, page_num: usize, num_results: usize) {
+	pub fn page_ready(&mut self, img: Protocol, page_num: usize, num_results: usize) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
 		// the last rect marker so that all images are forced to redraw on next render and this one

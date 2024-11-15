@@ -1,5 +1,3 @@
-#![feature(if_let_guard)]
-
 use std::{
 	io::{stdout, Read, Write},
 	num::NonZeroUsize,

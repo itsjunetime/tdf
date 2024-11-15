@@ -368,35 +368,77 @@ impl Tui {
 		match ev {
 			Event::Key(key) => {
 				match key.code {
-					KeyCode::Char(c)
-						if let BottomMessage::Input(InputCommand::Search(ref mut term)) =
-							self.bottom_msg =>
-					{
-						term.push(c);
-						Some(InputAction::Redraw)
-					}
-					KeyCode::Backspace
-						if let BottomMessage::Input(InputCommand::Search(ref mut term)) =
-							self.bottom_msg =>
-					{
-						term.pop();
-						Some(InputAction::Redraw)
-					}
-					KeyCode::Char(c)
-						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) =
-							self.bottom_msg =>
-						c.to_digit(10).map(|input_num| {
-							*page = (*page * 10) + input_num as usize;
-							InputAction::Redraw
-						}),
-					KeyCode::Right | KeyCode::Char('l') =>
-						self.change_page(PageChange::Next, ChangeAmount::Single),
-					KeyCode::Down | KeyCode::Char('j') =>
-						self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
-					KeyCode::Left | KeyCode::Char('h') =>
-						self.change_page(PageChange::Prev, ChangeAmount::Single),
-					KeyCode::Up | KeyCode::Char('k') =>
-						self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
+					KeyCode::Char(c) => {
+						// TODO: refactor back to `if let` arm guards when those are stabilized
+						if let BottomMessage::Input(InputCommand::Search(ref mut term)) = self.bottom_msg {
+							term.push(c);
+							return Some(InputAction::Redraw);
+						}
+
+						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) = self.bottom_msg {
+							return c.to_digit(10).map(|input_num| {
+								*page = (*page * 10) + input_num as usize;
+								InputAction::Redraw
+							});
+						}
+
+						match c {
+							'l' => self.change_page(PageChange::Next, ChangeAmount::Single),
+							'j' => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
+							'h' => self.change_page(PageChange::Prev, ChangeAmount::Single),
+							'k' => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
+							'q' => Some(InputAction::QuitApp),
+							'g' => {
+								self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::GoToPage(0))));
+								Some(InputAction::Redraw)
+							}
+							'/' => {
+								self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::Search(
+									String::new()
+								))));
+								Some(InputAction::Redraw)
+							}
+							'n' if self.page < self.rendered.len() - 1 => {
+								// TODO: If we can't find one, then maybe like block until we've verified
+								// all the pages have been checked?
+								let next_page = self.rendered[(self.page + 1)..]
+									.iter()
+									.enumerate()
+									.find_map(|(idx, p)| {
+										p.num_results
+											.is_some_and(|num| num > 0)
+											.then_some(self.page + 1 + idx)
+									});
+
+								jump_to_page(&mut self.page, &mut self.last_render.rect, next_page)
+							}
+							'N' if self.page > 0 => {
+								let prev_page = self.rendered[..(self.page)]
+									.iter()
+									.rev()
+									.enumerate()
+									.find_map(|(idx, p)| {
+										p.num_results
+											.is_some_and(|num| num > 0)
+											.then_some(self.page - (idx + 1))
+									});
+
+								jump_to_page(&mut self.page, &mut self.last_render.rect, prev_page)
+							},
+							_ => None
+						}
+					},
+					KeyCode::Backspace => {
+						if let BottomMessage::Input(InputCommand::Search(ref mut term)) = self.bottom_msg {
+							term.pop();
+							return Some(InputAction::Redraw);
+						}
+						None
+					},
+					KeyCode::Right => self.change_page(PageChange::Next, ChangeAmount::Single),
+					KeyCode::Down => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
+					KeyCode::Left => self.change_page(PageChange::Prev, ChangeAmount::Single),
+					KeyCode::Up => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
 					KeyCode::Esc => match self.bottom_msg {
 						BottomMessage::Input(_) => {
 							self.set_bottom_msg(None);
@@ -404,44 +446,6 @@ impl Tui {
 						}
 						_ => Some(InputAction::QuitApp)
 					},
-					KeyCode::Char('q') => Some(InputAction::QuitApp),
-					KeyCode::Char('g') => {
-						self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::GoToPage(0))));
-						Some(InputAction::Redraw)
-					}
-					KeyCode::Char('/') => {
-						self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::Search(
-							String::new()
-						))));
-						Some(InputAction::Redraw)
-					}
-					KeyCode::Char('n') if self.page < self.rendered.len() - 1 => {
-						// TODO: If we can't find one, then maybe like block until we've verified
-						// all the pages have been checked?
-						let next_page = self.rendered[(self.page + 1)..]
-							.iter()
-							.enumerate()
-							.find_map(|(idx, p)| {
-								p.num_results
-									.is_some_and(|num| num > 0)
-									.then_some(self.page + 1 + idx)
-							});
-
-						jump_to_page(&mut self.page, &mut self.last_render.rect, next_page)
-					}
-					KeyCode::Char('N') if self.page > 0 => {
-						let prev_page = self.rendered[..(self.page)]
-							.iter()
-							.rev()
-							.enumerate()
-							.find_map(|(idx, p)| {
-								p.num_results
-									.is_some_and(|num| num > 0)
-									.then_some(self.page - (idx + 1))
-							});
-
-						jump_to_page(&mut self.page, &mut self.last_render.rect, prev_page)
-					}
 					KeyCode::Enter => {
 						let BottomMessage::Input(_) = self.bottom_msg else {
 							return None;

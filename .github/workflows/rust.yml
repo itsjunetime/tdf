@@ -47,7 +47,7 @@ jobs:
         sudo make install
         sudo ldconfig
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
+    - name: Clippy
+      run: cargo clippy
     - name: Run tests
       run: cargo test

@@ -180,7 +180,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 				flush_if_mouse(&ev, &mut ev_stream).await;
 
-				// Some people have high mouse sensitivity
 				match tui.handle_event(&ev) {
 					None => needs_redraw = false,
 					Some(action) => match action {

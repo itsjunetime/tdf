@@ -6,7 +6,7 @@
 - Update `ratatui` and `ratatui-image` git dependencies to latest upstream
 - Move `ratatui-image/vb64` support under `nightly` feature, enabled by default
 - Fixed a bug where jumping to a page out of range could result in weird `esc` key behavior
-- Added CI
+- Added CI ([#31](https://github.com/itsjunetime/tdf/pull/31), thank you [@Kriejstal](https://github.com/Kreijstal))
 
 # v0.1.0
 

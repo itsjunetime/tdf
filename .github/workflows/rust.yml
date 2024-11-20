@@ -30,8 +30,8 @@ jobs:
     - name: Build newer poppler
       run: |
         wget http://archive.ubuntu.com/ubuntu/pool/main/p/poppler/poppler_23.08.0.orig.tar.xz
-        tar xf poppler-23.10.0.tar.xz
-        cd poppler-23.10.0
+        tar xf poppler_23.08.0.orig.tar.xz
+        cd poppler-23.08.0
         mkdir build && cd build
         cmake .. -DCMAKE_BUILD_TYPE=Release \
              -DCMAKE_C_COMPILER_LAUNCHER=sccache \

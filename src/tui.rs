@@ -1,4 +1,4 @@
-use std::{io::stdout, num::NonZeroUsize, rc::Rc};
+use std::{borrow::Cow, io::stdout, num::NonZeroUsize, rc::Rc};
 
 use crossterm::{
 	event::{Event, KeyCode, MouseEventKind},
@@ -152,18 +152,18 @@ impl Tui {
 		let rendered_span = Span::styled(&rendered_str, Style::new().fg(Color::Cyan));
 		frame.render_widget(rendered_span, bottom_layout[1]);
 
-		let (msg_str, color) = match self.bottom_msg {
+		let (msg_str, color): (Cow<'_, str>, _) = match self.bottom_msg {
 			BottomMessage::Help => (
-				"/: Search, g: Go To Page, n: Next Search Result, N: Previous Search Result"
-					.to_string(),
+				"/: Search, g: Go To Page, n: Next Search Result, N: Previous Search Result".into(),
 				Color::Blue
 			),
-			BottomMessage::Error(ref e) => (format!("Couldn't render a page: {e}"), Color::Red),
+			BottomMessage::Error(ref e) => (e.as_str().into(), Color::Red),
 			BottomMessage::Input(ref input_state) => (
 				match input_state {
 					InputCommand::GoToPage(page) => format!("Go to: {page}"),
 					InputCommand::Search(s) => format!("Search: {s}")
-				},
+				}
+				.into(),
 				Color::Blue
 			),
 			BottomMessage::SearchResults(ref term) => {
@@ -181,7 +181,8 @@ impl Tui {
 					format!(
 						"Results for '{term}': {num_found} (searched: {}%)",
 						num_searched / self.rendered.len()
-					),
+					)
+					.into(),
 					Color::Blue
 				)
 			}
@@ -370,12 +371,16 @@ impl Tui {
 				match key.code {
 					KeyCode::Char(c) => {
 						// TODO: refactor back to `if let` arm guards when those are stabilized
-						if let BottomMessage::Input(InputCommand::Search(ref mut term)) = self.bottom_msg {
+						if let BottomMessage::Input(InputCommand::Search(ref mut term)) =
+							self.bottom_msg
+						{
 							term.push(c);
 							return Some(InputAction::Redraw);
 						}
 
-						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) = self.bottom_msg {
+						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) =
+							self.bottom_msg
+						{
 							return c.to_digit(10).map(|input_num| {
 								*page = (*page * 10) + input_num as usize;
 								InputAction::Redraw
@@ -389,13 +394,15 @@ impl Tui {
 							'k' => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
 							'q' => Some(InputAction::QuitApp),
 							'g' => {
-								self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::GoToPage(0))));
+								self.set_bottom_msg(Some(BottomMessage::Input(
+									InputCommand::GoToPage(0)
+								)));
 								Some(InputAction::Redraw)
 							}
 							'/' => {
-								self.set_bottom_msg(Some(BottomMessage::Input(InputCommand::Search(
-									String::new()
-								))));
+								self.set_bottom_msg(Some(BottomMessage::Input(
+									InputCommand::Search(String::new())
+								)));
 								Some(InputAction::Redraw)
 							}
 							'n' if self.page < self.rendered.len() - 1 => {
@@ -424,27 +431,29 @@ impl Tui {
 									});
 
 								jump_to_page(&mut self.page, &mut self.last_render.rect, prev_page)
-							},
+							}
 							_ => None
 						}
-					},
+					}
 					KeyCode::Backspace => {
-						if let BottomMessage::Input(InputCommand::Search(ref mut term)) = self.bottom_msg {
+						if let BottomMessage::Input(InputCommand::Search(ref mut term)) =
+							self.bottom_msg
+						{
 							term.pop();
 							return Some(InputAction::Redraw);
 						}
 						None
-					},
+					}
 					KeyCode::Right => self.change_page(PageChange::Next, ChangeAmount::Single),
 					KeyCode::Down => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
 					KeyCode::Left => self.change_page(PageChange::Prev, ChangeAmount::Single),
 					KeyCode::Up => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
 					KeyCode::Esc => match self.bottom_msg {
-						BottomMessage::Input(_) => {
+						BottomMessage::Help => Some(InputAction::QuitApp),
+						_ => {
 							self.set_bottom_msg(None);
 							Some(InputAction::Redraw)
 						}
-						_ => Some(InputAction::QuitApp)
 					},
 					KeyCode::Enter => {
 						let BottomMessage::Input(_) = self.bottom_msg else {
@@ -463,10 +472,17 @@ impl Tui {
 							// Only forward the command if it's within range
 							InputCommand::GoToPage(page) => {
 								let page = *page;
-								(page < self.rendered.len()).then(|| {
+								let rendered_len = self.rendered.len();
+
+								if page < rendered_len {
 									self.set_page(page);
-									InputAction::JumpingToPage(page)
-								})
+									Some(InputAction::JumpingToPage(page))
+								} else {
+									self.set_bottom_msg(Some(BottomMessage::Error(
+										format!("Cannot jump to page {page}; there are only {rendered_len} pages in the document")
+									)));
+									Some(InputAction::Redraw)
+								}
 							}
 							InputCommand::Search(term) => {
 								let term = term.clone();

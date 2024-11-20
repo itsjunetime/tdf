@@ -29,9 +29,9 @@ jobs:
         sudo apt-get install -y cmake libjpeg-dev libfontconfig1-dev libopenjp2-7-dev libglib2.0-dev libnss3-dev libunwind-dev libgoogle-perftools-dev
     - name: Build newer poppler
       run: |
-        wget https://poppler.freedesktop.org/poppler-23.12.0.tar.xz
-        tar xf poppler-23.12.0.tar.xz
-        cd poppler-23.12.0
+        wget https://poppler.freedesktop.org/poppler-23.10.0.tar.xz
+        tar xf poppler-23.10.0.tar.xz
+        cd poppler-23.10.0
         mkdir build && cd build
         cmake .. -DCMAKE_BUILD_TYPE=Release \
              -DCMAKE_C_COMPILER_LAUNCHER=sccache \

@@ -26,7 +26,7 @@ jobs:
     - name: Install build dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake libjpeg-dev libfontconfig1-dev libopenjp2-7-dev libglib2.0-dev libnss3-dev libgoogle-perftools-dev
+        sudo apt-get install -y cmake libjpeg-dev libfontconfig1-dev libopenjp2-7-dev libglib2.0-dev libnss3-dev libunwind-dev libgoogle-perftools-dev
     - name: Build newer poppler
       run: |
         wget https://poppler.freedesktop.org/poppler-23.12.0.tar.xz

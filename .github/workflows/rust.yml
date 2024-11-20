@@ -48,7 +48,9 @@ jobs:
         sudo ldconfig
     - uses: actions/checkout@v4
     - name: Clippy
-      run: cargo clippy
+      run: cargo clippy -- -D warnings
+    - name: Check fmt
+      run: cargo fmt -- --check
     - name: Run tests
       run: cargo test
     - name: Build

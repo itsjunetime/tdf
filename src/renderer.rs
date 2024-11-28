@@ -76,13 +76,11 @@ pub fn start_rendering(
 ) -> Result<(), SendError<Result<RenderInfo, RenderError>>> {
 	// first, wait 'til we get told what the current starting area is so that we can set it to
 	// know what to render to
-	let mut area;
-	loop {
+	let mut area = loop {
 		if let RenderNotif::Area(r) = receiver.recv().unwrap() {
-			area = r;
-			break;
+			break r;
 		}
-	}
+	};
 
 	// We want this outside of 'reload so that if the doc reloads, the search term that somebody
 	// set will still get highlighted in the reloaded doc

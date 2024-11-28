@@ -4,7 +4,6 @@ use std::{
 	path::PathBuf
 };
 
-use converter::{run_conversion_loop, ConvertedPage, ConverterMsg};
 use crossterm::{
 	execute,
 	terminal::{
@@ -17,13 +16,11 @@ use glib::{LogField, LogLevel, LogWriterOutput};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
-use renderer::{RenderError, RenderInfo, RenderNotif};
-use tui::{InputAction, Tui};
-
-mod converter;
-mod renderer;
-mod skip;
-mod tui;
+use tdf::{
+	converter::{run_conversion_loop, ConvertedPage, ConverterMsg},
+	renderer::{self, RenderError, RenderInfo, RenderNotif},
+	tui::{InputAction, Tui}
+};
 
 // Dummy struct for easy errors in main
 #[derive(Debug)]
@@ -143,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		|| "Unknown file".into(),
 		|n| n.to_string_lossy().to_string()
 	);
-	let mut tui = tui::Tui::new(file_name, flags.max_wide, flags.r_to_l.unwrap_or_default());
+	let mut tui = Tui::new(file_name, flags.max_wide, flags.r_to_l.unwrap_or_default());
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend)?;
@@ -161,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	)?;
 	enable_raw_mode()?;
 
-	let mut main_area = tui::Tui::main_layout(&term.get_frame());
+	let mut main_area = Tui::main_layout(&term.get_frame());
 	tui_tx.send(RenderNotif::Area(main_area[1]))?;
 
 	let mut tui_rx = tui_rx.into_stream();
@@ -259,7 +256,7 @@ fn on_notify_ev(
 			// happened, then like the main thread has panicked or something, so it doesn't matter
 			// we don't handle the error here.
 			EventKind::Other | EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) =>
-				drop(to_render_tx.send(renderer::RenderNotif::Reload)),
+				drop(to_render_tx.send(RenderNotif::Reload)),
 		}
 	}
 }

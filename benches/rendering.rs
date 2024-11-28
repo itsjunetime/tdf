@@ -71,7 +71,7 @@ pub async fn render_first_page(path: impl AsRef<Path>) {
 	} = start_all_rendering(path);
 
 	// we only want to render until the first page is ready to be printed
-	while pages.iter().all(|p| p.is_none()) {
+	while pages.iter().all(Option::is_none) {
 		tokio::select! {
 			Some(renderer_msg) = from_render_rx.next() => {
 				handle_renderer_msg(renderer_msg, &mut pages, &mut to_converter_tx);
@@ -101,7 +101,7 @@ async fn render_all_files(path: &'static str) -> Vec<PageInfo> {
 			}
 		};
 
-		if pages.iter().all(|p| p.is_some()) {
+		if pages.iter().all(Option::is_some) {
 			break;
 		}
 	}
@@ -136,7 +136,7 @@ async fn convert_all_files(files: Vec<PageInfo>) {
 		}
 	}
 
-	while converted.iter().any(|p| p.is_none()) {
+	while converted.iter().any(Option::is_none) {
 		let page = from_converter_rx
 			.next()
 			.await
@@ -157,7 +157,7 @@ impl Profiler for CpuProfiler {
 	fn start_profiling(&mut self, benchmark_id: &str, _: &std::path::Path) {
 		let file = format!(
 			"./{}-{}.profile",
-			benchmark_id.replace("/", "-"),
+			benchmark_id.replace('/', "-"),
 			SystemTime::now()
 				.duration_since(UNIX_EPOCH)
 				.unwrap()

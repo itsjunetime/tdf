@@ -1,10 +1,13 @@
 use std::{
+	future::poll_fn,
 	io::{stdout, Read, Write},
 	num::NonZeroUsize,
-	path::PathBuf
+	path::PathBuf,
+	task::Poll
 };
 
 use crossterm::{
+	event::{Event, EventStream, MouseEvent, MouseEventKind},
 	execute,
 	terminal::{
 		disable_raw_mode, enable_raw_mode, window_size, EndSynchronizedUpdate,
@@ -13,7 +16,7 @@ use crossterm::{
 };
 use futures_util::{stream::StreamExt, FutureExt};
 use glib::{LogField, LogLevel, LogWriterOutput};
-use notify::{Event, EventKind, RecursiveMode, Watcher};
+use notify::{EventKind, RecursiveMode, Watcher};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
 use tdf::{
@@ -129,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		renderer::start_rendering(&file_path, render_tx, render_rx, window_size)
 	});
 
-	let mut ev_stream = crossterm::event::EventStream::new();
+	let mut ev_stream = EventStream::new();
 
 	let (to_converter, from_main) = flume::unbounded();
 	let (to_main, from_converter) = flume::unbounded();
@@ -171,6 +174,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			Some(ev) = ev_stream.next().fuse() => {
 				// If we can't get user input, just crash.
 				let ev = ev.expect("Couldn't get any user input");
+
+				flush_if_mouse(&ev, &mut ev_stream).await;
 
 				match tui.handle_event(&ev) {
 					None => needs_redraw = false,
@@ -241,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn on_notify_ev(
 	to_tui_tx: flume::Sender<Result<RenderInfo, RenderError>>,
 	to_render_tx: flume::Sender<RenderNotif>
-) -> impl Fn(notify::Result<Event>) {
+) -> impl Fn(notify::Result<notify::Event>) {
 	move |res| match res {
 		// If we get an error here, and then an error sending, everything's going wrong. Just give
 		// up lol.
@@ -263,4 +268,36 @@ fn on_notify_ev(
 
 fn noop(_: LogLevel, _: &[LogField<'_>]) -> LogWriterOutput {
 	LogWriterOutput::Handled
+}
+
+async fn flush_if_mouse(ev: &Event, ev_stream: &mut EventStream) {
+	// If you have a high scroll sensitivity, on some platforms, crossterm sends 2+ mouse events per
+	// scroll. However, because tdf scrolls pages once per mouse event, that means that they can't
+	// scroll the pages of their PDF as they would expect - it jumps multiple pages per one scroll.
+	// So this just flushes the event queue once we detect a scroll event to make sure those extra
+	// scrolls are ignored.
+	//
+	// Theoretically, this introduces a race condition where events that arrive in between the
+	// processing of `ev` and the time we call `poll_next_unpin` can get ignored, but that's a very
+	// very small amount of time, so unlikely to happen. However, if that does become an issue, we
+	// can just flush the event queue until we see a non-scroll event, then store that event in a
+	// future that will return it next time we call `tokio::select!` in the main loop. That'll make
+	// sure we don't miss anything.
+	if let Event::Mouse(MouseEvent {
+		kind:
+			MouseEventKind::ScrollUp
+			| MouseEventKind::ScrollDown
+			| MouseEventKind::ScrollLeft
+			| MouseEventKind::ScrollRight,
+		..
+	}) = ev
+	{
+		poll_fn(|ctx| {
+			while ev_stream.poll_next_unpin(ctx).is_ready() {
+				println!("got another mouse event!");
+			}
+			Poll::Ready(())
+		})
+		.await;
+	}
 }

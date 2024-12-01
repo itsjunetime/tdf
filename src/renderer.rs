@@ -25,7 +25,8 @@ pub enum RenderError {
 
 pub enum RenderInfo {
 	NumPages(usize),
-	Page(PageInfo)
+	Page(PageInfo),
+	Reloaded
 }
 
 #[derive(Clone)]
@@ -91,24 +92,37 @@ pub fn start_rendering(
 	let col_w = size.width / size.columns;
 	let col_h = size.height / size.rows;
 
+	let mut stored_doc = None;
+
 	'reload: loop {
 		let doc = match Document::from_file(path, None) {
 			Err(e) => {
 				// if there's an error, tell the main loop
 				sender.send(Err(RenderError::Doc(e)))?;
-				// then wait for a reload notif (since what probably happened is that the file was
-				// temporarily removed to facilitate a save or something like that)
-				while let Ok(msg) = receiver.recv() {
-					// and once that comes, just try to reload again
-					if let RenderNotif::Reload = msg {
-						continue 'reload;
+
+				match stored_doc {
+					Some(ref d) => d,
+					None => {
+						// then wait for a reload notif (since what probably happened is that the file was
+						// temporarily removed to facilitate a save or something like that)
+						while let Ok(msg) = receiver.recv() {
+							// and once that comes, just try to reload again
+							if let RenderNotif::Reload = msg {
+								continue 'reload;
+							}
+						}
+						// if that while let Ok ever fails and we exit out of that loop, the main thread is
+						// done, so we're fine to just return
+						return Ok(());
 					}
 				}
-				// if that while let Ok ever fails and we exit out of that loop, the main thread is
-				// done, so we're fine to just return
-				return Ok(());
 			}
-			Ok(d) => d
+			Ok(d) => {
+				if stored_doc.is_some() {
+					sender.send(Ok(RenderInfo::Reloaded))?;
+				}
+				&*stored_doc.insert(d)
+			}
 		};
 
 		let n_pages = doc.n_pages() as usize;
@@ -199,8 +213,8 @@ pub fn start_rendering(
 				// we only want to continue if one of the following is met:
 				// 1. It failed to render last time (we want to retry)
 				// 2. The `contained_term` is set to None (representing 'Unknown'), meaning that we
-				//    need to at least check if it contains the current term to see if it needs a
-				//    re-render
+				//	  need to at least check if it contains the current term to see if it needs a
+				//	  re-render
 				if rendered.successful && rendered.contained_term.is_some() {
 					continue;
 				}

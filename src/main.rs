@@ -1,4 +1,5 @@
 use std::{
+	ffi::OsString,
 	io::{stdout, Read, Write},
 	num::NonZeroUsize,
 	path::PathBuf
@@ -19,7 +20,7 @@ use ratatui_image::picker::Picker;
 use tdf::{
 	converter::{run_conversion_loop, ConvertedPage, ConverterMsg},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
-	tui::{InputAction, Tui}
+	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
 
 // Dummy struct for easy errors in main
@@ -57,12 +58,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let (render_tx, tui_rx) = flume::unbounded();
 	let watch_to_tui_tx = render_tx.clone();
 
-	let mut watcher =
-		notify::recommended_watcher(on_notify_ev(watch_to_tui_tx, watch_to_render_tx))?;
+	let mut watcher = notify::recommended_watcher(on_notify_ev(
+		watch_to_tui_tx,
+		watch_to_render_tx,
+		path.file_name()
+			.ok_or("Path does not have a last component??")?
+			.to_owned()
+	))?;
 
-	// We're making this nonrecursive 'cause we're just watching a single file, so there's nothing
-	// to recurse into
-	watcher.watch(&path, RecursiveMode::NonRecursive)?;
+	// So we have to watch the parent directory of the file that we are interested in because the
+	// `notify` library works on inodes, and if the file is deleted, that inode is gone as well,
+	// and then the notify library just gives up on trying to watch for the file reappearing. Imo
+	// they should start watching the parent directory if the file is deleted, and then wait for it
+	// to reappear and then begin watching it again, but whatever. It seems they've made their
+	// opinion on this clear
+	// (https://github.com/notify-rs/notify/issues/113#issuecomment-281836995) so whatever, guess
+	// we have to do this annoying workaround.
+	watcher.watch(
+		path.parent().expect("The root directory is not a PDF"),
+		RecursiveMode::NonRecursive
+	)?;
 
 	// TODO: Handle non-utf8 file names? Maybe by constructing a CString and passing that in to the
 	// poppler stuff instead of a rust string?
@@ -187,20 +202,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			},
 			Some(renderer_msg) = tui_rx.next() => {
 				match renderer_msg {
-					// if an Ok comes through, we know the error has been resolved ('cause it kinda
-					// bails whenever we run into an error) so just clear it
-					Ok(render_info) => {
-						match render_info {
-							RenderInfo::NumPages(num) => {
-								tui.set_n_pages(num);
-								to_converter.send(ConverterMsg::NumPages(num))?;
-							},
-							RenderInfo::Page(info) => {
-								tui.got_num_results_on_page(info.page, info.search_results);
-								to_converter.send(ConverterMsg::AddImg(info))?;
-							},
-						}
-						tui.set_bottom_msg(None);
+					Ok(render_info) => match render_info {
+						RenderInfo::NumPages(num) => {
+							tui.set_n_pages(num);
+							to_converter.send(ConverterMsg::NumPages(num))?;
+						},
+						RenderInfo::Page(info) => {
+							tui.got_num_results_on_page(info.page, info.search_results);
+							to_converter.send(ConverterMsg::AddImg(info))?;
+						},
+						RenderInfo::Reloaded => tui.set_msg(MessageSetting::Some(BottomMessage::Reloaded)),
 					},
 					Err(e) => tui.show_error(e),
 				}
@@ -240,7 +251,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn on_notify_ev(
 	to_tui_tx: flume::Sender<Result<RenderInfo, RenderError>>,
-	to_render_tx: flume::Sender<RenderNotif>
+	to_render_tx: flume::Sender<RenderNotif>,
+	file_name: OsString
 ) -> impl Fn(notify::Result<Event>) {
 	move |res| match res {
 		// If we get an error here, and then an error sending, everything's going wrong. Just give
@@ -248,15 +260,29 @@ fn on_notify_ev(
 		Err(e) => to_tui_tx.send(Err(RenderError::Notify(e))).unwrap(),
 		// TODO: Should we match EventKind::Rename and propogate that so that the other parts of the
 		// process know that too? Or should that be
-		Ok(ev) => match ev.kind {
-			EventKind::Access(_) => (),
-			EventKind::Remove(_) =>
-				drop(to_tui_tx.send(Err(RenderError::Render("File was deleted".into())))),
-			// This shouldn't fail to send unless the receiver gets disconnected. If that's
-			// happened, then like the main thread has panicked or something, so it doesn't matter
-			// we don't handle the error here.
-			EventKind::Other | EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) =>
-				drop(to_render_tx.send(RenderNotif::Reload)),
+		Ok(ev) => {
+			// We only watch the parent directory (see the comment above `watcher.watch` in `fn
+			// main`) so we need to filter out events to only ones that pertain to the single file
+			// we care about
+			if !ev
+				.paths
+				.iter()
+				.any(|path| path.file_name().is_some_and(|f| f == file_name))
+			{
+				return;
+			}
+
+			match ev.kind {
+				EventKind::Access(_) => (),
+				EventKind::Remove(_) => to_tui_tx
+					.send(Err(RenderError::Render("File was deleted".into())))
+					.unwrap(),
+				// This shouldn't fail to send unless the receiver gets disconnected. If that's
+				// happened, then like the main thread has panicked or something, so it doesn't matter
+				// we don't handle the error here.
+				EventKind::Other | EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) =>
+					to_render_tx.send(RenderNotif::Reload).unwrap(),
+			}
 		}
 	}
 }

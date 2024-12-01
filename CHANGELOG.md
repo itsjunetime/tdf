@@ -8,6 +8,8 @@
 - Fixed a bug where jumping to a page out of range could result in weird `esc` key behavior
 - Added CI ([#31](https://github.com/itsjunetime/tdf/pull/31), thank you [@Kriejstal](https://github.com/Kreijstal))
 - Changed global allocator to [`mimalloc`](https://github.com/purpleprotocol/mimalloc_rust) for slightly improved performance
+- Fixed issue with document reloading not working when files are intermedially deleted
+- Fixed a lot of weirdness with bottom message layering/updating
 
 # v0.1.0
 

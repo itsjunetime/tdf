@@ -94,6 +94,7 @@ async fn render_all_files(path: &'static str) -> Vec<PageInfo> {
 
 	while let Some(info) = from_render_rx.next().await {
 		match info.expect("Renderer ran into an error while rendering") {
+			RenderInfo::Reloaded => (),
 			RenderInfo::NumPages(num) => fill_default(&mut pages, num),
 			RenderInfo::Page(page) => {
 				let num = page.page;

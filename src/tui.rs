@@ -43,7 +43,8 @@ pub enum BottomMessage {
 	Help,
 	SearchResults(String),
 	Error(String),
-	Input(InputCommand)
+	Input(InputCommand),
+	Reloaded
 }
 
 pub enum InputCommand {
@@ -186,6 +187,7 @@ impl Tui {
 					Color::Blue
 				)
 			}
+			BottomMessage::Reloaded => ("Document was reloaded!".into(), Color::Blue)
 		};
 
 		let span = Span::styled(msg_str, Style::new().fg(color));
@@ -394,13 +396,13 @@ impl Tui {
 							'k' => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
 							'q' => Some(InputAction::QuitApp),
 							'g' => {
-								self.set_bottom_msg(Some(BottomMessage::Input(
+								self.set_msg(MessageSetting::Some(BottomMessage::Input(
 									InputCommand::GoToPage(0)
 								)));
 								Some(InputAction::Redraw)
 							}
 							'/' => {
-								self.set_bottom_msg(Some(BottomMessage::Input(
+								self.set_msg(MessageSetting::Some(BottomMessage::Input(
 									InputCommand::Search(String::new())
 								)));
 								Some(InputAction::Redraw)
@@ -451,34 +453,33 @@ impl Tui {
 					KeyCode::Esc => match self.bottom_msg {
 						BottomMessage::Help => Some(InputAction::QuitApp),
 						_ => {
-							self.set_bottom_msg(None);
+							// When we hit escape, we just want to pop off the current message and
+							// show the underlying one.
+							self.set_msg(MessageSetting::Pop);
 							Some(InputAction::Redraw)
 						}
 					},
 					KeyCode::Enter => {
-						let BottomMessage::Input(_) = self.bottom_msg else {
+						let mut default = BottomMessage::default();
+						std::mem::swap(&mut self.bottom_msg, &mut default);
+						let BottomMessage::Input(ref cmd) = default else {
+							std::mem::swap(&mut self.bottom_msg, &mut default);
 							return None;
-						};
-
-						self.set_bottom_msg(None);
-						let Some(BottomMessage::Input(ref cmd)) = self.prev_msg else {
-							// We need to verify it's an input msg currently, and only then take it
-							// and replace it by a default Help message. Don't exactly know how to
-							// do this otherwise.
-							unreachable!();
 						};
 
 						match cmd {
 							// Only forward the command if it's within range
 							InputCommand::GoToPage(page) => {
-								let page = *page;
+								// We need to subtract 1 b/c they're tracked internally as
+								// 0-indexed but input and displayed as 1-indexed
+								let zero_page = page.saturating_sub(1);
 								let rendered_len = self.rendered.len();
 
-								if page < rendered_len {
-									self.set_page(page);
-									Some(InputAction::JumpingToPage(page))
+								if zero_page < rendered_len {
+									self.set_page(zero_page);
+									Some(InputAction::JumpingToPage(zero_page))
 								} else {
-									self.set_bottom_msg(Some(BottomMessage::Error(
+									self.set_msg(MessageSetting::Some(BottomMessage::Error(
 										format!("Cannot jump to page {page}; there are only {rendered_len} pages in the document")
 									)));
 									Some(InputAction::Redraw)
@@ -490,14 +491,14 @@ impl Tui {
 								// We only want to show search results if there would actually be
 								// data to show
 								if !term.is_empty() {
-									self.set_bottom_msg(Some(BottomMessage::SearchResults(
-										term.clone()
-									)));
+									self.set_msg(MessageSetting::Some(
+										BottomMessage::SearchResults(term.clone())
+									));
 								} else {
 									// else, if it's not empty, we just want to reset the bottom
 									// area to show the default data; we don't want it to like show
 									// the data from a previous search
-									self.set_bottom_msg(Some(BottomMessage::Help));
+									self.set_msg(MessageSetting::Reset);
 								}
 
 								// Reset all the search results
@@ -531,7 +532,7 @@ impl Tui {
 	}
 
 	pub fn show_error(&mut self, err: RenderError) {
-		self.set_bottom_msg(Some(BottomMessage::Error(match err {
+		self.set_msg(MessageSetting::Some(BottomMessage::Error(match err {
 			RenderError::Notify(e) => format!("Auto-reload failed: {e}"),
 			RenderError::Doc(e) => format!("Couldn't open document: {e}"),
 			RenderError::Render(e) => format!("Couldn't render page: {e}")
@@ -548,17 +549,18 @@ impl Tui {
 
 	// We have `msg` as optional so that if they reset it to none, it'll replace it with
 	// `prev_msg`, but if they reset it to something else, it'll put the current thing in prev_msg
-	pub fn set_bottom_msg(&mut self, msg: Option<BottomMessage>) {
+	pub fn set_msg(&mut self, msg: MessageSetting) {
 		match msg {
-			Some(mut msg) => {
+			MessageSetting::Some(mut msg) => {
 				std::mem::swap(&mut self.bottom_msg, &mut msg);
 				self.prev_msg = Some(msg);
 			}
-			None => {
-				let mut new_bottom = self.prev_msg.take().unwrap_or_default();
-				std::mem::swap(&mut self.bottom_msg, &mut new_bottom);
-				self.prev_msg = Some(new_bottom);
+			MessageSetting::Default => self.set_msg(MessageSetting::Some(BottomMessage::default())),
+			MessageSetting::Reset => {
+				self.prev_msg = None;
+				self.bottom_msg = BottomMessage::default();
 			}
+			MessageSetting::Pop => self.bottom_msg = self.prev_msg.take().unwrap_or_default()
 		}
 	}
 }
@@ -580,4 +582,11 @@ enum PageChange {
 enum ChangeAmount {
 	WholeScreen,
 	Single
+}
+
+pub enum MessageSetting {
+	Some(BottomMessage),
+	Default,
+	Reset,
+	Pop
 }

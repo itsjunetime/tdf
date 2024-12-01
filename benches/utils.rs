@@ -21,6 +21,8 @@ pub fn handle_renderer_msg(
 			to_converter_tx.send(ConverterMsg::NumPages(num)).unwrap();
 		}
 		Ok(RenderInfo::Page(info)) => to_converter_tx.send(ConverterMsg::AddImg(info)).unwrap(),
+		// We can ignore the `Reloaded` variant 'cause that's only used to send info to the TUI
+		Ok(RenderInfo::Reloaded) => (),
 		Err(e) => panic!("Got error from renderer: {e:?}")
 	}
 }

@@ -1,4 +1,4 @@
-# Unreleased
+# v0.2.0
 
 - Add `--r-to-l` flag to support displaying pdfs that read from right to left
 - Add `--max-wide` flag to restrict amount of pages that can appear on the screen at a time

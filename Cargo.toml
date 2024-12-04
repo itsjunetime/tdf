@@ -1,6 +1,6 @@
 [package]
-name = "tdf"
-version = "0.1.0"
+name = "tdf-viewer"
+version = "0.2.0"
 authors = ["June Welker <junewelker@gmail.com>"]
 edition = "2021"
 description = "A terminal viewer for PDFs"
@@ -14,6 +14,7 @@ default-run = "tdf"
 
 [[bin]]
 name = "tdf"
+path = "src/main.rs"
 
 # lib only exists for benching
 [lib]

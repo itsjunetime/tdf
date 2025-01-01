@@ -272,7 +272,7 @@ impl Tui {
 
 	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
 		match self.rendered[page_idx].img {
-			Some(ref page_img) => frame.render_widget(Image::new(page_img), img_area),
+			Some(ref mut page_img) => frame.render_widget(Image::new(page_img), img_area),
 			None => Self::render_loading_in(frame, img_area)
 		};
 	}

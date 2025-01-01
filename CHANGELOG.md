@@ -1,3 +1,7 @@
+# Unreleased
+
+- Update ratatui(-image)? dependencies
+
 # v0.2.0
 
 - Add `--r-to-l` flag to support displaying pdfs that read from right to left

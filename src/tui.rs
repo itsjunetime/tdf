@@ -1,9 +1,16 @@
 use std::{borrow::Cow, io::stdout, num::NonZeroUsize, rc::Rc};
 
 use crossterm::{
-	event::{Event, KeyCode, MouseEventKind},
+	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
 	execute,
-	terminal::BeginSynchronizedUpdate
+	terminal::{
+		disable_raw_mode, enable_raw_mode, BeginSynchronizedUpdate, EnterAlternateScreen,
+		LeaveAlternateScreen
+	}
+};
+use nix::{
+	sys::signal::{kill, Signal::SIGSTOP},
+	unistd::Pid
 };
 use ratatui::{
 	layout::{Constraint, Flex, Layout, Rect},
@@ -433,6 +440,34 @@ impl Tui {
 									});
 
 								jump_to_page(&mut self.page, &mut self.last_render.rect, prev_page)
+							}
+							'z' if key.modifiers.contains(KeyModifiers::CONTROL) => {
+								// [todo] better error handling here?
+
+								let mut backend = stdout();
+								execute!(
+									&mut backend,
+									LeaveAlternateScreen,
+									crossterm::cursor::Show
+								)
+								.unwrap();
+								disable_raw_mode().unwrap();
+
+								// This process will hang after the SIGSTOP call until we get
+								// foregrounded again by something else, at which point we need to
+								// re-setup everything so that it all gets drawn again.
+								kill(Pid::this(), SIGSTOP).unwrap();
+
+								enable_raw_mode().unwrap();
+								execute!(
+									&mut backend,
+									EnterAlternateScreen,
+									crossterm::cursor::Hide
+								)
+								.unwrap();
+
+								self.last_render.rect = Rect::default();
+								Some(InputAction::Redraw)
 							}
 							_ => None
 						}

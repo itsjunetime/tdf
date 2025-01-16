@@ -31,7 +31,7 @@ ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", bran
 # ratatui-image = { path = "./ratatui-image", features = ["vb64"], default-features = false }
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 image = { version = "0.25.1", features = ["png", "rayon"], default-features = false }
-notify = { version = "7.0.0", features = ["crossbeam-channel"] }
+notify = { version = "8.0.0", features = ["crossbeam-channel"] }
 tokio = { version = "1.37.0", features = ["rt-multi-thread", "macros"] }
 futures-util = { version = "0.3.30", default-features = false }
 glib = "0.20.0"
@@ -39,6 +39,7 @@ itertools = "*"
 flume = { version = "0.11.0", default-features = false, features = ["async"] }
 xflags = "0.4.0-pre.2"
 mimalloc = "0.1.43"
+nix = { version = "0.29.0", features = ["signal"] }
 
 # for tracing with tokio-console
 console-subscriber = { version = "0.4.0", optional = true }

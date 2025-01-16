@@ -1,6 +1,7 @@
 # Unreleased
 
-- Update ratatui(-image)? dependencies
+- Update ratatui(-image) dependencies
+- Enable Ctrl+Z/Suspend functionality
 
 # v0.2.0
 

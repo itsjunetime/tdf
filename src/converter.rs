@@ -1,6 +1,5 @@
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt;
-use image::ImageFormat;
 use itertools::Itertools;
 use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
 
@@ -54,22 +53,22 @@ pub async fn run_conversion_loop(
 			return Ok(None);
 		};
 
-		let img_area = page_info.img_data.area;
+		let dyn_img = image::load_from_memory_with_format(
+			&page_info.img_data.pixels,
+			image::ImageFormat::Pnm
+		)
+		.map_err(|e| RenderError::Converting(format!("Can't load image: {e}")))?;
 
-		let dyn_img =
-			image::load_from_memory_with_format(&page_info.img_data.data, ImageFormat::Png)
-				.map_err(|e| {
-					RenderError::Render(format!("Couldn't convert Vec<u8> to DynamicImage: {e}"))
-				})?;
+		let img_area = page_info.img_data.cell_area;
 
 		// We don't actually want to Crop this image, but we've already
 		// verified (with the ImageSurface stuff) that the image is the correct
 		// size for the area given, so to save ratatui the work of having to
 		// resize it, we tell them to crop it to fit.
 		let txt_img = picker
-			.new_protocol(dyn_img, img_area, Resize::None)
+			.new_protocol(dyn_img, img_area, Resize::Scale(None))
 			.map_err(|e| {
-				RenderError::Render(format!(
+				RenderError::Converting(format!(
 					"Couldn't convert DynamicImage to ratatui image: {e}"
 				))
 			})?;
@@ -79,7 +78,7 @@ pub async fn run_conversion_loop(
 
 		Ok(Some(ConvertedPage {
 			page: txt_img,
-			num: page_info.page,
+			num: page_info.page_num,
 			num_results: page_info.search_results
 		}))
 	}
@@ -87,7 +86,7 @@ pub async fn run_conversion_loop(
 	fn handle_notif(msg: ConverterMsg, images: &mut Vec<Option<PageInfo>>, page: &mut usize) {
 		match msg {
 			ConverterMsg::AddImg(img) => {
-				let page_num = img.page;
+				let page_num = img.page_num;
 				images[page_num] = Some(img);
 			}
 			ConverterMsg::NumPages(n_pages) => {

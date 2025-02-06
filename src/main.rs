@@ -13,7 +13,7 @@ use crossterm::{
 	}
 };
 use futures_util::{stream::StreamExt, FutureExt};
-use glib::{LogField, LogLevel, LogWriterOutput};
+// use glib::{LogField, LogLevel, LogWriterOutput};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	// TODO: Handle non-utf8 file names? Maybe by constructing a CString and passing that in to the
 	// poppler stuff instead of a rust string?
-	let file_path = format!("file://{}", path.clone().into_os_string().to_string_lossy());
+	let file_path = path.clone().into_os_string().to_string_lossy().to_string();
 
 	let mut window_size = window_size()?;
 
@@ -164,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// poppler has some annoying logging (e.g. if you request a page index out-of-bounds of a
 	// document's pages, then it will return `None`, but still log to stderr with CRITICAL level),
 	// so we want to just ignore all logging since this is a tui app.
-	glib::log_set_writer_func(noop);
+	// glib::log_set_writer_func(noop);
 
 	execute!(
 		term.backend_mut(),
@@ -208,7 +208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 							to_converter.send(ConverterMsg::NumPages(num))?;
 						},
 						RenderInfo::Page(info) => {
-							tui.got_num_results_on_page(info.page, info.search_results);
+							tui.got_num_results_on_page(info.page_num, info.search_results);
 							to_converter.send(ConverterMsg::AddImg(info))?;
 						},
 						RenderInfo::Reloaded => tui.set_msg(MessageSetting::Some(BottomMessage::Reloaded)),
@@ -275,7 +275,7 @@ fn on_notify_ev(
 			match ev.kind {
 				EventKind::Access(_) => (),
 				EventKind::Remove(_) => to_tui_tx
-					.send(Err(RenderError::Render("File was deleted".into())))
+					.send(Err(RenderError::Converting("File was deleted".into())))
 					.unwrap(),
 				// This shouldn't fail to send unless the receiver gets disconnected. If that's
 				// happened, then like the main thread has panicked or something, so it doesn't matter
@@ -287,6 +287,6 @@ fn on_notify_ev(
 	}
 }
 
-fn noop(_: LogLevel, _: &[LogField<'_>]) -> LogWriterOutput {
+/*fn noop(_: LogLevel, _: &[LogField<'_>]) -> LogWriterOutput {
 	LogWriterOutput::Handled
-}
+}*/

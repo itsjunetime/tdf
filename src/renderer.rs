@@ -1,10 +1,9 @@
-use std::thread;
+use std::{thread::sleep, time::Duration};
 
-use cairo::{Antialias, Context, Format, Surface};
 use crossterm::terminal::WindowSize;
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use itertools::Itertools;
-use poppler::{Color, Document, FindFlags, Page, Rectangle, SelectionStyle};
+use mupdf::{Colorspace, Document, Matrix, Page, Pixmap, TextPageOptions};
 use ratatui::layout::Rect;
 
 pub enum RenderNotif {
@@ -17,10 +16,8 @@ pub enum RenderNotif {
 #[derive(Debug)]
 pub enum RenderError {
 	Notify(notify::Error),
-	Doc(glib::Error),
-	// Don't like storing an error as a string but it needs to be Send to send to the main thread,
-	// and it's just going to be shown to the user, so whatever
-	Render(String)
+	Doc(mupdf::error::Error),
+	Converting(String)
 }
 
 pub enum RenderInfo {
@@ -32,14 +29,14 @@ pub enum RenderInfo {
 #[derive(Clone)]
 pub struct PageInfo {
 	pub img_data: ImageData,
-	pub page: usize,
+	pub page_num: usize,
 	pub search_results: usize
 }
 
 #[derive(Clone)]
 pub struct ImageData {
-	pub data: Vec<u8>,
-	pub area: Rect
+	pub pixels: Vec<u8>,
+	pub cell_area: Rect
 }
 
 #[derive(Default)]
@@ -71,7 +68,7 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 #[allow(clippy::needless_pass_by_value)]
 pub fn start_rendering(
 	path: &str,
-	mut sender: Sender<Result<RenderInfo, RenderError>>,
+	sender: Sender<Result<RenderInfo, RenderError>>,
 	receiver: Receiver<RenderNotif>,
 	size: WindowSize
 ) -> Result<(), SendError<Result<RenderInfo, RenderError>>> {
@@ -95,7 +92,7 @@ pub fn start_rendering(
 	let mut stored_doc = None;
 
 	'reload: loop {
-		let doc = match Document::from_file(path, None) {
+		let doc = match Document::open(path) {
 			Err(e) => {
 				// if there's an error, tell the main loop
 				sender.send(Err(RenderError::Doc(e)))?;
@@ -125,7 +122,17 @@ pub fn start_rendering(
 			}
 		};
 
-		let n_pages = doc.n_pages() as usize;
+		//let n_pages = doc.page_count() as usize;
+		let n_pages = match doc.page_count() {
+			Ok(n) => n as usize,
+			Err(e) => {
+				sender.send(Err(RenderError::Doc(e)))?;
+				// just basic backoff i think
+				sleep(Duration::from_secs(1));
+				continue 'reload;
+			}
+		};
+
 		sender.send(Ok(RenderInfo::NumPages(n_pages)))?;
 
 		// We're using this vec of bools to indicate which page numbers have already been rendered,
@@ -205,8 +212,8 @@ pub fn start_rendering(
 						.map(|(idx, p)| (start_point - (idx + 1), p))
 				);
 
-			let area_w = f64::from(area.width) * f64::from(col_w);
-			let area_h = f64::from(area.height) * f64::from(col_h);
+			let area_w = f32::from(area.width) * f32::from(col_w);
+			let area_h = f32::from(area.height) * f32::from(col_h);
 
 			// we go through each page
 			for (num, rendered) in page_iter {
@@ -230,12 +237,12 @@ pub fn start_rendering(
 
 				// We know this is in range 'cause we're iterating over it but we still just want
 				// to be safe
-				let Some(page) = doc.page(num as i32) else {
-					sender.send(Err(RenderError::Render(format!(
-						"Couldn't get page {num} ({}) of doc?",
-						num as i32
-					))))?;
-					continue;
+				let page = match doc.load_page(num as i32) {
+					Err(e) => {
+						sender.send(Err(RenderError::Doc(e)))?;
+						continue;
+					}
+					Ok(p) => p
 				};
 
 				let rendered_with_no_results =
@@ -260,23 +267,31 @@ pub fn start_rendering(
 						rendered.contained_term = Some(ctx.num_results > 0);
 						rendered.successful = true;
 
-						// if this is the page that the user is currently trying to look at, don't
-						// bother spawning off a thread to render it to a png - it'll only slow
-						// down the time til the user can see it (due to the overhead of creating a
-						// thread), but we still want to spawn threads to render the other pages
-						// since the effects of parallelizing that will be noticeable if the user
-						// tries to move through pages more quickly
-						if num == start_point {
-							render_ctx_to_png(&ctx, &mut sender, (col_w, col_h), num)?;
-						} else {
-							let mut sender = sender.clone();
-							thread::spawn(move || {
-								render_ctx_to_png(&ctx, &mut sender, (col_w, col_h), num)
-							});
-						}
+						let cap = (ctx.pixmap.width()
+							* ctx.pixmap.height() * u32::from(ctx.pixmap.n()))
+							as usize;
+						let mut pixels = Vec::with_capacity(cap);
+						if let Err(e) = ctx.pixmap.write_to(&mut pixels, mupdf::ImageFormat::PAM) {
+							sender.send(Err(RenderError::Doc(e)))?;
+							continue;
+						};
+
+						sender.send(Ok(RenderInfo::Page(PageInfo {
+							img_data: ImageData {
+								pixels,
+								cell_area: Rect {
+									x: 0,
+									y: 0,
+									width: (ctx.surface_w / f32::from(col_w)) as u16,
+									height: (ctx.surface_h / f32::from(col_h)) as u16
+								}
+							},
+							page_num: num,
+							search_results: ctx.num_results
+						})))?;
 					}
 					// And if we got an error, then obviously we need to propagate that
-					Err(e) => sender.send(Err(RenderError::Render(e)))?
+					Err(e) => sender.send(Err(RenderError::Doc(e)))?
 				}
 			}
 
@@ -295,10 +310,10 @@ pub fn start_rendering(
 }
 
 struct RenderedContext {
-	surface: Surface,
-	num_results: usize,
-	surface_width: f64,
-	surface_height: f64
+	pixmap: Pixmap,
+	surface_w: f32,
+	surface_h: f32,
+	num_results: usize
 }
 
 /// SAFETY: I think this is safe because, although the backing struct for `Surface` does contain
@@ -317,11 +332,15 @@ fn render_single_page_to_ctx(
 	page: &Page,
 	search_term: Option<&str>,
 	already_rendered_no_results: bool,
-	(area_w, area_h): (f64, f64)
-) -> Result<Option<RenderedContext>, String> {
-	let mut result_rects = search_term
+	(area_w, area_h): (f32, f32)
+) -> Result<Option<RenderedContext>, mupdf::error::Error> {
+	let result_rects = search_term
 		.as_ref()
-		.map(|term| page.find_text_with_options(term, FindFlags::DEFAULT | FindFlags::MULTILINE))
+		.map(|term| {
+			page.to_text_page(TextPageOptions::all())?
+				.search(term, u32::MAX)
+		})
+		.transpose()?
 		.unwrap_or_default();
 
 	// If there are no search terms on this page, and we've already rendered it with no search
@@ -331,7 +350,11 @@ fn render_single_page_to_ctx(
 	}
 
 	// then, get the size of the page
-	let (p_width, p_height) = page.size();
+	let bounds = page.bounds()?;
+	let (p_width, p_height) = (
+		f32::from(bounds.x1 - bounds.x0),
+		f32::from(bounds.y1 - bounds.y0)
+	);
 
 	// and get its aspect ratio
 	let p_aspect_ratio = p_width / p_height;
@@ -353,39 +376,22 @@ fn render_single_page_to_ctx(
 		area_h / p_height
 	};
 
-	let surface_width = p_width * scale_factor;
-	let surface_height = p_height * scale_factor;
+	let surface_w = p_width * scale_factor;
+	let surface_h = p_height * scale_factor;
 
-	let surface = cairo::ImageSurface::create(
-		Format::Rgb16_565,
-		// No matter how big you make these arguments, the image will be drawn at the same
-		// size. So if you make them really big, the image will be drawn on a quarter of it. If
-		// you make them really small, the image will cover more than all of the surface.
-		//
-		// However, that only stands as long as you don't scale the context that you place this
-		// surface into. If you scale the dimensions of this image by n, then scale the context
-		// by that same amount, then it'll still fit perfectly into the context, but be
-		// rendered at higher quality.
-		surface_width as i32,
-		surface_height as i32
-	)
-	.map_err(|e| format!("Couldn't create ImageSurface: {e}"))?;
-	surface.set_device_scale(scale_factor, scale_factor);
+	let colorspace = Colorspace::device_rgb();
+	let matrix = Matrix::new_scale(scale_factor, scale_factor);
 
-	let ctx = Context::new(surface).map_err(|e| format!("Couldn't create Context: {e}"))?;
+	let mut pixmap = page.to_pixmap(&matrix, &colorspace, 0.0, false)?;
 
-	// The default background color of PDFs (at least, I think) is white, so we need to set
-	// that as the background color, then paint, then render.
-	ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0);
-
-	ctx.set_antialias(Antialias::None);
-	ctx.paint()
-		.map_err(|e| format!("Couldn't paint Context: {e}"))?;
-	page.render(&ctx);
+	let (x_res, y_res) = pixmap.resolution();
+	let new_x = (x_res as f32 * scale_factor) as i32;
+	let new_y = (y_res as f32 * scale_factor) as i32;
+	pixmap.set_resolution(new_x, new_y);
 
 	let num_results = result_rects.len();
 
-	if !result_rects.is_empty() {
+	/*if !result_rects.is_empty() {
 		let mut highlight_color = Color::new();
 		highlight_color.set_red((u16::MAX / 5) * 4);
 		highlight_color.set_green((u16::MAX / 5) * 4);
@@ -406,40 +412,12 @@ fn render_single_page_to_ctx(
 				&mut highlight_color
 			);
 		}
-	}
+	}*/
 
 	Ok(Some(RenderedContext {
-		surface: ctx.target(),
-		num_results,
-		surface_width,
-		surface_height
+		pixmap,
+		surface_w,
+		surface_h,
+		num_results
 	}))
-}
-
-fn render_ctx_to_png(
-	ctx: &RenderedContext,
-	sender: &mut Sender<Result<RenderInfo, RenderError>>,
-	(col_w, col_h): (u16, u16),
-	page: usize
-) -> Result<(), SendError<Result<RenderInfo, RenderError>>> {
-	let mut img_data = Vec::with_capacity((ctx.surface_height * ctx.surface_width) as usize);
-
-	match ctx.surface.write_to_png(&mut img_data) {
-		Err(e) => sender.send(Err(RenderError::Render(format!(
-			"Couldn't write surface to png: {e}"
-		)))),
-		Ok(()) => sender.send(Ok(RenderInfo::Page(PageInfo {
-			img_data: ImageData {
-				data: img_data,
-				area: Rect {
-					width: ctx.surface_width as u16 / col_w,
-					height: ctx.surface_height as u16 / col_h,
-					x: 0,
-					y: 0
-				}
-			},
-			page,
-			search_results: ctx.num_results
-		})))
-	}
 }

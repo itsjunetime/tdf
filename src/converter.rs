@@ -66,7 +66,7 @@ pub async fn run_conversion_loop(
 		// size for the area given, so to save ratatui the work of having to
 		// resize it, we tell them to crop it to fit.
 		let txt_img = picker
-			.new_protocol(dyn_img, img_area, Resize::Scale(None))
+			.new_protocol(dyn_img, img_area, Resize::None)
 			.map_err(|e| {
 				RenderError::Converting(format!(
 					"Couldn't convert DynamicImage to ratatui image: {e}"

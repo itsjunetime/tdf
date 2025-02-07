@@ -271,7 +271,7 @@ pub fn start_rendering(
 							* ctx.pixmap.height() * u32::from(ctx.pixmap.n()))
 							as usize;
 						let mut pixels = Vec::with_capacity(cap);
-						if let Err(e) = ctx.pixmap.write_to(&mut pixels, mupdf::ImageFormat::PAM) {
+						if let Err(e) = ctx.pixmap.write_to(&mut pixels, mupdf::ImageFormat::PNM) {
 							sender.send(Err(RenderError::Doc(e)))?;
 							continue;
 						};

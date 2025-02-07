@@ -122,7 +122,6 @@ pub fn start_rendering(
 			}
 		};
 
-		//let n_pages = doc.page_count() as usize;
 		let n_pages = match doc.page_count() {
 			Ok(n) => n as usize,
 			Err(e) => {
@@ -351,10 +350,7 @@ fn render_single_page_to_ctx(
 
 	// then, get the size of the page
 	let bounds = page.bounds()?;
-	let (p_width, p_height) = (
-		f32::from(bounds.x1 - bounds.x0),
-		f32::from(bounds.y1 - bounds.y0)
-	);
+	let (p_width, p_height) = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
 
 	// and get its aspect ratio
 	let p_aspect_ratio = p_width / p_height;

@@ -13,7 +13,6 @@ use crossterm::{
 	}
 };
 use futures_util::{stream::StreamExt, FutureExt};
-// use glib::{LogField, LogLevel, LogWriterOutput};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
@@ -161,11 +160,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut term = Terminal::new(backend)?;
 	term.skip_diff(true);
 
-	// poppler has some annoying logging (e.g. if you request a page index out-of-bounds of a
-	// document's pages, then it will return `None`, but still log to stderr with CRITICAL level),
-	// so we want to just ignore all logging since this is a tui app.
-	// glib::log_set_writer_func(noop);
-
 	execute!(
 		term.backend_mut(),
 		EnterAlternateScreen,
@@ -286,7 +280,3 @@ fn on_notify_ev(
 		}
 	}
 }
-
-/*fn noop(_: LogLevel, _: &[LogField<'_>]) -> LogWriterOutput {
-	LogWriterOutput::Handled
-}*/

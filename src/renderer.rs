@@ -3,7 +3,7 @@ use std::{thread::sleep, time::Duration};
 use crossterm::terminal::WindowSize;
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use itertools::Itertools;
-use mupdf::{Colorspace, Document, Matrix, Page, Pixmap, TextPageOptions};
+use mupdf::{Colorspace, Document, Matrix, Page, Pixmap};
 use ratatui::layout::Rect;
 
 pub enum RenderNotif {
@@ -336,8 +336,7 @@ fn render_single_page_to_ctx(
 	let result_rects = search_term
 		.as_ref()
 		.map(|term| {
-			page.to_text_page(TextPageOptions::all())?
-				.search(term, u32::MAX)
+			page.search(term, u32::MAX)
 		})
 		.transpose()?
 		.unwrap_or_default();

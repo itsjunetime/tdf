@@ -24,7 +24,7 @@ name = "tdf"
 # we're using this branch because it has significant performance fixes that I'm waiting on responses from the upstream devs to get upstreamed. See https://github.com/ratatui-org/ratatui/issues/1116
 ratatui = { git = "https://github.com/itsjunetime/ratatui.git" }
 # ratatui = { path = "./ratatui/ratatui" }
-# We're using this to have the vb64 feature (for faster base64 encoding, since that does take up a good bit of time when converting images to the Box<dyn ratatui_image::Protocol>. It also just includes a few more features that I'm waiting on main to upstream
+# We're using this to have the vb64 feature (for faster base64 encoding, since that does take up a good bit of time when converting images to the `Protocol`. It also just includes a few more features that I'm waiting on main to upstream
 ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", branch = "vb64_on_personal", default-features = false }
 # ratatui-image = { path = "./ratatui-image", features = ["vb64"], default-features = false }
 crossterm = { version = "0.28.1", features = ["event-stream"] }
@@ -37,7 +37,7 @@ flume = { version = "0.11.0", default-features = false, features = ["async"] }
 xflags = "0.4.0-pre.2"
 mimalloc = "0.1.43"
 nix = { version = "0.29.0", features = ["signal"] }
-mupdf = { version = "0.4.4", default-features = false, features = ["svg", "system-fonts", "img"] }
+mupdf = { git = "https://github.com/itsjunetime/mupdf-rs", branch = "june/plug_in_zerocopy", default-features = false, features = ["svg", "system-fonts", "img"] }
 
 # for tracing with tokio-console
 console-subscriber = { version = "0.4.0", optional = true }
@@ -154,3 +154,6 @@ unused_self = "warn"
 used_underscore_binding = "warn"
 used_underscore_items = "warn"
 zero_sized_map_values = "warn"
+
+[patch.crates-io]
+pathfinder_simd = { git = "https://github.com/itsjunetime/pathfinder.git" }

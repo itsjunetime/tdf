@@ -53,7 +53,7 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 	}
 }
 
-// this function has to be sync (non-async) because the poppler::Document needs to be held during
+// this function has to be sync (non-async) because the mupdf::Document needs to be held during
 // most of it, but that's basically just a wrapper around `*c_void` cause it's just a binding to C
 // code, so it's !Send and thus can't be held across await points. So we can't call any of the
 // async `send` or `recv` methods in this function body, since those create await points. Which
@@ -314,18 +314,6 @@ struct RenderedContext {
 	surface_h: f32,
 	result_rects: Vec<HighlightRect>
 }
-
-/// SAFETY: I think this is safe because, although the backing struct for `Surface` does contain
-/// pointers to like the cairo_backend_t struct that all the cairo stuff is using, that struct is
-/// basically just a vtable, so accessing it from multiple threads *should* be safe since we're
-/// just calling the same functions with different data. The only other thing it holds reference to
-/// is a `cairo_device_t`, but that seems to be thread-safe because it's managed through ref counts
-/// and a mutex. Also, as far as I can tell from reading the source code, write_to_png_stream (the
-/// only function we call on this struct) doesn't access the device at all, so we should be fine
-/// there.
-/// We want this to be Send so that we can delegate the png writing to a separate thread (since
-/// that's the thing that takes the most time, by far, in this app).
-unsafe impl Send for RenderedContext {}
 
 fn render_single_page_to_ctx(
 	page: &Page,

@@ -14,7 +14,7 @@ Designed to be performant, very responsive, and work well with even very large P
 - Reactive layout
 
 ## To Build
-First, you need to install the system dependencies. This includes packages such as (but not limited to) `cairo`, `gtk`, and `poppler`. If you're on linux, these will probably show up in your package manager as something like `libcairo-devel` or `cairo-dev`.
+First, you need to install the system dependencies. This will generally only include `libfontconfig`. If you're on linux, these will probably show up in your package manager as something like `libfontconfig1-devel` or `libfontconfig-dev`.
 
 If it turns out that you're missing one of these, it will fail to compile and tell you what library you're missing. Find the development package for that library in your package manager, install it, and try to build again. Now, the important steps:
 
@@ -30,4 +30,4 @@ I dunno. Just for fun, mostly.
 
 Yeah, sure. Please do.
 
-Please note, though, that all contributions will be treated as licensed under MPL-2.0. This is so that we can relicense to MPL-2.0 at some point in the future if we manage to move away from poppler as a backend (since that is the only dependency, at time of writing, which requires the GPLv3 license).
+Please note, though, that all contributions will be treated as licensed under MPL-2.0.

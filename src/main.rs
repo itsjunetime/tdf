@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	)?;
 
 	// TODO: Handle non-utf8 file names? Maybe by constructing a CString and passing that in to the
-	// poppler stuff instead of a rust string?
+	// mupdf stuff instead of a rust string?
 	let file_path = path.clone().into_os_string().to_string_lossy().to_string();
 
 	let mut window_size = window_size()?;

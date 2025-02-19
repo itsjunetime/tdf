@@ -28,7 +28,7 @@ ratatui = { git = "https://github.com/itsjunetime/ratatui.git" }
 ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", branch = "vb64_on_personal", default-features = false }
 # ratatui-image = { path = "./ratatui-image", features = ["vb64"], default-features = false }
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-image = { version = "0.25.1", features = ["pnm", "rayon", "img"], default-features = false }
+image = { version = "0.25.1", features = ["pnm", "rayon", "png"], default-features = false }
 notify = { version = "8.0.0", features = ["crossbeam-channel"] }
 tokio = { version = "1.37.0", features = ["rt-multi-thread", "macros"] }
 futures-util = { version = "0.3.30", default-features = false }

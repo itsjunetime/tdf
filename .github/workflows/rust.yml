@@ -23,6 +23,10 @@ jobs:
       run: |
         echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
         echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfontconfig1-dev
     - uses: actions/checkout@v4
     - name: Clippy
       run: cargo clippy -- -D warnings

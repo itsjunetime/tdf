@@ -1,7 +1,9 @@
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt;
+use image::DynamicImage;
 use itertools::Itertools;
 use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
+use rayon::iter::ParallelIterator;
 
 use crate::renderer::{fill_default, PageInfo, RenderError};
 
@@ -53,11 +55,23 @@ pub async fn run_conversion_loop(
 			return Ok(None);
 		};
 
-		let dyn_img = image::load_from_memory_with_format(
+		let mut dyn_img = image::load_from_memory_with_format(
 			&page_info.img_data.pixels,
 			image::ImageFormat::Pnm
 		)
 		.map_err(|e| RenderError::Converting(format!("Can't load image: {e}")))?;
+
+		match dyn_img {
+			DynamicImage::ImageRgb8(ref mut img) =>
+				for quad in &*page_info.result_rects {
+					img.par_enumerate_pixels_mut()
+						.filter(|(x, y, _)| {
+							*x > quad.ul_x && *x < quad.lr_x && *y > quad.ul_y && *y < quad.lr_y
+						})
+						.for_each(|(_, _, px)| px.0[2] = px.0[2].saturating_sub(u8::MAX / 2));
+				},
+			_ => unreachable!()
+		};
 
 		let img_area = page_info.img_data.cell_area;
 
@@ -79,7 +93,7 @@ pub async fn run_conversion_loop(
 		Ok(Some(ConvertedPage {
 			page: txt_img,
 			num: page_info.page_num,
-			num_results: page_info.search_results
+			num_results: page_info.result_rects.len()
 		}))
 	}
 

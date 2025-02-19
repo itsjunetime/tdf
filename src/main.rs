@@ -202,7 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 							to_converter.send(ConverterMsg::NumPages(num))?;
 						},
 						RenderInfo::Page(info) => {
-							tui.got_num_results_on_page(info.page_num, info.search_results);
+							tui.got_num_results_on_page(info.page_num, info.result_rects.len());
 							to_converter.send(ConverterMsg::AddImg(info))?;
 						},
 						RenderInfo::Reloaded => tui.set_msg(MessageSetting::Some(BottomMessage::Reloaded)),

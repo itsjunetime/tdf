@@ -569,7 +569,7 @@ impl Tui {
 	pub fn show_error(&mut self, err: RenderError) {
 		self.set_msg(MessageSetting::Some(BottomMessage::Error(match err {
 			RenderError::Notify(e) => format!("Auto-reload failed: {e}"),
-			RenderError::Doc(e) => format!("Couldn't open document: {e}"),
+			RenderError::Doc(e) => format!("Couldn't process document: {e}"),
 			RenderError::Converting(e) => format!("Couldn't convert page after rendering: {e}")
 		})));
 	}

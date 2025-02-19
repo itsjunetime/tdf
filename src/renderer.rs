@@ -30,7 +30,7 @@ pub enum RenderInfo {
 pub struct PageInfo {
 	pub img_data: ImageData,
 	pub page_num: usize,
-	pub search_results: usize
+	pub result_rects: Vec<HighlightRect>
 }
 
 #[derive(Clone)]
@@ -263,7 +263,7 @@ pub fn start_rendering(
 						// we make a potentially incorrect assumption here that writing the context
 						// to a png won't fail, and mark that it all rendered correctly here before
 						// spawning off the thread to do so and send it.
-						rendered.contained_term = Some(ctx.num_results > 0);
+						rendered.contained_term = Some(ctx.result_rects.is_empty());
 						rendered.successful = true;
 
 						let cap = (ctx.pixmap.width()
@@ -286,7 +286,7 @@ pub fn start_rendering(
 								}
 							},
 							page_num: num,
-							search_results: ctx.num_results
+							result_rects: ctx.result_rects
 						})))?;
 					}
 					// And if we got an error, then obviously we need to propagate that
@@ -312,7 +312,7 @@ struct RenderedContext {
 	pixmap: Pixmap,
 	surface_w: f32,
 	surface_h: f32,
-	num_results: usize
+	result_rects: Vec<HighlightRect>
 }
 
 /// SAFETY: I think this is safe because, although the backing struct for `Surface` does contain
@@ -333,13 +333,25 @@ fn render_single_page_to_ctx(
 	already_rendered_no_results: bool,
 	(area_w, area_h): (f32, f32)
 ) -> Result<Option<RenderedContext>, mupdf::error::Error> {
-	let result_rects = search_term
-		.as_ref()
-		.map(|term| {
-			page.search(term, u32::MAX)
-		})
-		.transpose()?
-		.unwrap_or_default();
+	let mut max_hits = 10;
+	let result_rects = loop {
+		let rects = search_term
+			.as_ref()
+			// mupdf allocates a buffer of the size we give it to try to fill it with results. If we
+			// pass in u32::MAX, it allocates too much memory to function. If we pass too small of a
+			// number in, we may miss out on some of the results. Ideally, we'd like to make a better
+			// interface than this, but we're stuck with this kinda ugly looping until we make sure
+			// that we've found every instance of it on this page.
+			.map(|term| page.search(term, max_hits))
+			.transpose()?
+			.unwrap_or_default();
+
+		if rects.len() < (max_hits as usize) {
+			break rects;
+		}
+
+		max_hits *= 2;
+	};
 
 	// If there are no search terms on this page, and we've already rendered it with no search
 	// terms, then just return none to avoid this computation
@@ -384,35 +396,34 @@ fn render_single_page_to_ctx(
 	let new_y = (y_res as f32 * scale_factor) as i32;
 	pixmap.set_resolution(new_x, new_y);
 
-	let num_results = result_rects.len();
-
-	/*if !result_rects.is_empty() {
-		let mut highlight_color = Color::new();
-		highlight_color.set_red((u16::MAX / 5) * 4);
-		highlight_color.set_green((u16::MAX / 5) * 4);
-
-		let mut old_rect = Rectangle::new();
-		for rect in &mut result_rects {
-			// According to https://gitlab.freedesktop.org/poppler/poppler/-/issues/763, these rects
-			// need to be corrected since they use different references as the y-coordinate base
-			rect.set_y1(p_height - rect.y1());
-			rect.set_y2(p_height - rect.y2());
-
-			page.render_selection(
-				&ctx,
-				rect,
-				&mut old_rect,
-				SelectionStyle::Glyph,
-				&mut Color::new(),
-				&mut highlight_color
-			);
-		}
-	}*/
+	let result_rects = result_rects
+		.into_iter()
+		.map(|quad| {
+			let ul_x = (quad.ul.x * scale_factor) as u32;
+			let ul_y = (quad.ul.y * scale_factor) as u32;
+			let lr_x = (quad.lr.x * scale_factor) as u32;
+			let lr_y = (quad.lr.y * scale_factor) as u32;
+			HighlightRect {
+				ul_x,
+				ul_y,
+				lr_x,
+				lr_y
+			}
+		})
+		.collect::<Vec<_>>();
 
 	Ok(Some(RenderedContext {
 		pixmap,
 		surface_w,
 		surface_h,
-		num_results
+		result_rects
 	}))
+}
+
+#[derive(Clone)]
+pub struct HighlightRect {
+	pub ul_x: u32,
+	pub ul_y: u32,
+	pub lr_x: u32,
+	pub lr_y: u32
 }

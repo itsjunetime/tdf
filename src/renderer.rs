@@ -10,7 +10,8 @@ pub enum RenderNotif {
 	Area(Rect),
 	JumpToPage(usize),
 	Search(String),
-	Reload
+	Reload,
+	Invert
 }
 
 #[derive(Debug)]
@@ -90,6 +91,7 @@ pub fn start_rendering(
 	let col_h = size.height / size.rows;
 
 	let mut stored_doc = None;
+	let mut invert = false;
 
 	'reload: loop {
 		let doc = match Document::open(path) {
@@ -154,6 +156,13 @@ pub fn start_rendering(
 				($notif:ident) => {
 					match $notif {
 						RenderNotif::Reload => continue 'reload,
+						RenderNotif::Invert => {
+							invert = !invert;
+							for page in &mut rendered {
+								page.successful = false;
+							}
+							continue 'render_pages;
+						}
 						RenderNotif::Area(new_area) => {
 							let bigger =
 								new_area.width > area.width || new_area.height > area.height;
@@ -252,6 +261,7 @@ pub fn start_rendering(
 					&page,
 					search_term.as_deref(),
 					rendered_with_no_results,
+					invert,
 					(area_w, area_h)
 				) {
 					// If we've already rendered it just fine and we don't need to render it again,
@@ -319,6 +329,7 @@ fn render_single_page_to_ctx(
 	page: &Page,
 	search_term: Option<&str>,
 	already_rendered_no_results: bool,
+	invert: bool,
 	(area_w, area_h): (f32, f32)
 ) -> Result<Option<RenderedContext>, mupdf::error::Error> {
 	let mut max_hits = 10;
@@ -378,6 +389,9 @@ fn render_single_page_to_ctx(
 	let matrix = Matrix::new_scale(scale_factor, scale_factor);
 
 	let mut pixmap = page.to_pixmap(&matrix, &colorspace, 0.0, false)?;
+	if invert {
+		pixmap.invert()?;
+	}
 
 	let (x_res, y_res) = pixmap.resolution();
 	let new_x = (x_res as f32 * scale_factor) as i32;

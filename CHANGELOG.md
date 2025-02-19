@@ -3,6 +3,7 @@
 - Update ratatui(-image) dependencies
 - Enable Ctrl+Z/Suspend functionality
 - Rewrite with mupdf as the backend for much better performance and rendering quality
+- Support easy inversion of colors via `i` keypress
 
 # v0.2.0
 

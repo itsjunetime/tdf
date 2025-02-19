@@ -191,6 +191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 							to_converter.send(ConverterMsg::GoToPage(page))?;
 						},
 						InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term))?,
+						InputAction::Invert => tui_tx.send(RenderNotif::Invert)?
 					}
 				}
 			},

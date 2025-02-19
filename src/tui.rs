@@ -414,6 +414,7 @@ impl Tui {
 								)));
 								Some(InputAction::Redraw)
 							}
+							'i' => Some(InputAction::Invert),
 							'n' if self.page < self.rendered.len() - 1 => {
 								// TODO: If we can't find one, then maybe like block until we've verified
 								// all the pages have been checked?
@@ -604,7 +605,8 @@ pub enum InputAction {
 	Redraw,
 	JumpingToPage(usize),
 	Search(String),
-	QuitApp
+	QuitApp,
+	Invert
 }
 
 #[derive(Copy, Clone)]

@@ -1,8 +1,9 @@
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt;
-use image::ImageFormat;
+use image::DynamicImage;
 use itertools::Itertools;
 use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
+use rayon::iter::ParallelIterator;
 
 use crate::renderer::{fill_default, PageInfo, RenderError};
 
@@ -54,13 +55,25 @@ pub async fn run_conversion_loop(
 			return Ok(None);
 		};
 
-		let img_area = page_info.img_data.area;
+		let mut dyn_img = image::load_from_memory_with_format(
+			&page_info.img_data.pixels,
+			image::ImageFormat::Pnm
+		)
+		.map_err(|e| RenderError::Converting(format!("Can't load image: {e}")))?;
 
-		let dyn_img =
-			image::load_from_memory_with_format(&page_info.img_data.data, ImageFormat::Png)
-				.map_err(|e| {
-					RenderError::Render(format!("Couldn't convert Vec<u8> to DynamicImage: {e}"))
-				})?;
+		match dyn_img {
+			DynamicImage::ImageRgb8(ref mut img) =>
+				for quad in &*page_info.result_rects {
+					img.par_enumerate_pixels_mut()
+						.filter(|(x, y, _)| {
+							*x > quad.ul_x && *x < quad.lr_x && *y > quad.ul_y && *y < quad.lr_y
+						})
+						.for_each(|(_, _, px)| px.0[2] = px.0[2].saturating_sub(u8::MAX / 2));
+				},
+			_ => unreachable!()
+		};
+
+		let img_area = page_info.img_data.cell_area;
 
 		// We don't actually want to Crop this image, but we've already
 		// verified (with the ImageSurface stuff) that the image is the correct
@@ -69,7 +82,7 @@ pub async fn run_conversion_loop(
 		let txt_img = picker
 			.new_protocol(dyn_img, img_area, Resize::None)
 			.map_err(|e| {
-				RenderError::Render(format!(
+				RenderError::Converting(format!(
 					"Couldn't convert DynamicImage to ratatui image: {e}"
 				))
 			})?;
@@ -79,15 +92,15 @@ pub async fn run_conversion_loop(
 
 		Ok(Some(ConvertedPage {
 			page: txt_img,
-			num: page_info.page,
-			num_results: page_info.search_results
+			num: page_info.page_num,
+			num_results: page_info.result_rects.len()
 		}))
 	}
 
 	fn handle_notif(msg: ConverterMsg, images: &mut Vec<Option<PageInfo>>, page: &mut usize) {
 		match msg {
 			ConverterMsg::AddImg(img) => {
-				let page_num = img.page;
+				let page_num = img.page_num;
 				images[page_num] = Some(img);
 			}
 			ConverterMsg::NumPages(n_pages) => {

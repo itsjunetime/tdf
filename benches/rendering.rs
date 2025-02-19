@@ -97,7 +97,7 @@ async fn render_all_files(path: &'static str) -> Vec<PageInfo> {
 			RenderInfo::Reloaded => (),
 			RenderInfo::NumPages(num) => fill_default(&mut pages, num),
 			RenderInfo::Page(page) => {
-				let num = page.page;
+				let num = page.page_num;
 				pages[num] = Some(page);
 			}
 		};

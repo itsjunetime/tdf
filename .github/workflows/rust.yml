@@ -26,25 +26,7 @@ jobs:
     - name: Install build dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake libjpeg-dev libfontconfig1-dev libopenjp2-7-dev libopenjpip7 libopenjp2-7 libglib2.0-dev libnss3-dev libunwind-dev libgoogle-perftools-dev libboost-dev
-    - name: Build newer poppler
-      run: |
-        wget https://poppler.freedesktop.org/poppler-23.10.0.tar.xz
-        tar xf poppler-23.10.0.tar.xz
-        cd poppler-23.10.0
-        mkdir build && cd build
-        cmake .. -DCMAKE_BUILD_TYPE=Release \
-             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
-             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
-             -DENABLE_UNSTABLE_API_ABI_HEADERS=ON \
-             -DENABLE_GPGME=OFF \
-             -DENABLE_QT5=OFF \
-             -DENABLE_QT6=OFF \
-             -DENABLE_SPLASH=OFF \
-             -DENABLE_LIBCURL=OFF
-        make -j$(nproc)
-        sudo make install
-        sudo ldconfig
+        sudo apt-get install -y libfontconfig1-dev libgoogle-perftools-dev google-perftools
     - uses: actions/checkout@v4
     - name: Clippy
       run: cargo clippy -- -D warnings

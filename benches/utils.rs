@@ -1,13 +1,13 @@
 use std::{hint::black_box, path::Path};
 
 use crossterm::terminal::WindowSize;
-use flume::{r#async::RecvStream, unbounded, Sender};
+use flume::{Sender, r#async::RecvStream, unbounded};
 use futures_util::stream::StreamExt as _;
 use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
 use tdf::{
-	converter::{run_conversion_loop, ConvertedPage, ConverterMsg},
-	renderer::{fill_default, start_rendering, RenderError, RenderInfo, RenderNotif}
+	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
+	renderer::{RenderError, RenderInfo, RenderNotif, fill_default, start_rendering}
 };
 
 pub fn handle_renderer_msg(

@@ -4,22 +4,22 @@ use crossterm::{
 	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
 	execute,
 	terminal::{
-		disable_raw_mode, enable_raw_mode, BeginSynchronizedUpdate, EnterAlternateScreen,
-		LeaveAlternateScreen
+		BeginSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+		enable_raw_mode
 	}
 };
 use nix::{
-	sys::signal::{kill, Signal::SIGSTOP},
+	sys::signal::{Signal::SIGSTOP, kill},
 	unistd::Pid
 };
 use ratatui::{
+	Frame,
 	layout::{Constraint, Flex, Layout, Rect},
 	style::{Color, Style},
 	text::Span,
-	widgets::{Block, Borders, Padding},
-	Frame
+	widgets::{Block, Borders, Padding}
 };
-use ratatui_image::{protocol::Protocol, Image};
+use ratatui_image::{Image, protocol::Protocol};
 
 use crate::{renderer::RenderError, skip::Skip};
 
@@ -516,7 +516,9 @@ impl Tui {
 									Some(InputAction::JumpingToPage(zero_page))
 								} else {
 									self.set_msg(MessageSetting::Some(BottomMessage::Error(
-										format!("Cannot jump to page {page}; there are only {rendered_len} pages in the document")
+										format!(
+											"Cannot jump to page {page}; there are only {rendered_len} pages in the document"
+										)
 									)));
 									Some(InputAction::Redraw)
 								}

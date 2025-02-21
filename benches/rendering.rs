@@ -6,15 +6,15 @@ use std::{
 	time::{SystemTime, UNIX_EPOCH}
 };
 
-use criterion::{criterion_group, criterion_main, profiler::Profiler, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main, profiler::Profiler};
 use futures_util::StreamExt;
 use tdf::{
 	converter::{ConvertedPage, ConverterMsg},
-	renderer::{fill_default, PageInfo, RenderInfo}
+	renderer::{PageInfo, RenderInfo, fill_default}
 };
 use utils::{
-	handle_converter_msg, handle_renderer_msg, render_doc, start_all_rendering,
-	start_converting_loop, start_rendering_loop, RenderState
+	RenderState, handle_converter_msg, handle_renderer_msg, render_doc, start_all_rendering,
+	start_converting_loop, start_rendering_loop
 };
 
 const FILES: [&str; 3] = [

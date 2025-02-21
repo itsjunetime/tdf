@@ -2,10 +2,10 @@ use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt;
 use image::DynamicImage;
 use itertools::Itertools;
-use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
+use ratatui_image::{Resize, picker::Picker, protocol::Protocol};
 use rayon::iter::ParallelIterator;
 
-use crate::renderer::{fill_default, PageInfo, RenderError};
+use crate::renderer::{PageInfo, RenderError, fill_default};
 
 pub struct ConvertedPage {
 	pub page: Protocol,

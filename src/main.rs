@@ -1,6 +1,6 @@
 use std::{
 	ffi::OsString,
-	io::{stdout, Read, Write},
+	io::{Read, Write, stdout},
 	num::NonZeroUsize,
 	path::PathBuf
 };
@@ -8,16 +8,16 @@ use std::{
 use crossterm::{
 	execute,
 	terminal::{
-		disable_raw_mode, enable_raw_mode, window_size, EndSynchronizedUpdate,
-		EnterAlternateScreen, LeaveAlternateScreen
+		EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+		enable_raw_mode, window_size
 	}
 };
-use futures_util::{stream::StreamExt, FutureExt};
+use futures_util::{FutureExt, stream::StreamExt};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use ratatui_image::picker::Picker;
 use tdf::{
-	converter::{run_conversion_loop, ConvertedPage, ConverterMsg},
+	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };

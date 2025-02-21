@@ -2,7 +2,7 @@
 name = "tdf-viewer"
 version = "0.2.0"
 authors = ["June Welker <junewelker@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "A terminal viewer for PDFs"
 readme = "README.md"
 homepage = "https://github.com/itsjunetime/tdf"
@@ -11,6 +11,7 @@ license = "AGPL-3.0-only"
 keywords = ["pdf", "tui", "cli", "terminal"]
 categories = ["command-line-utilities", "text-processing", "visualization"]
 default-run = "tdf"
+rust-version = "1.85"
 
 [[bin]]
 name = "tdf"

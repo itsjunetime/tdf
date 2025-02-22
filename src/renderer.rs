@@ -276,9 +276,9 @@ pub fn start_rendering(
 						rendered.contained_term = Some(ctx.result_rects.is_empty());
 						rendered.successful = true;
 
-						let cap = (ctx.pixmap.width()
-							* ctx.pixmap.height() * u32::from(ctx.pixmap.n()))
-							as usize;
+						let w = ctx.pixmap.width();
+						let h = ctx.pixmap.height();
+						let cap = (w * h * u32::from(ctx.pixmap.n())) as usize + 16;
 						let mut pixels = Vec::with_capacity(cap);
 						if let Err(e) = ctx.pixmap.write_to(&mut pixels, mupdf::ImageFormat::PNM) {
 							sender.send(Err(RenderError::Doc(e)))?;

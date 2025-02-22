@@ -37,13 +37,13 @@ pub fn handle_converter_msg(
 
 	pages[num] = Some(page);
 
-	let num_got = pages.iter().filter(|p| p.is_some()).count();
+	let first_none = pages.iter().position(Option::is_none);
 
 	// we have to tell it to jump to a certain page so that it will actually render it (since
 	// it only renders fanning out from the page that we currently have selected)
-	to_converter_tx
-		.send(ConverterMsg::GoToPage(num_got))
-		.unwrap();
+	if let Some(first) = first_none {
+		to_converter_tx.send(ConverterMsg::GoToPage(first)).unwrap();
+	}
 }
 
 pub struct RenderState {

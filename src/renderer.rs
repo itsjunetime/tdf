@@ -46,12 +46,10 @@ struct PrevRender {
 	contained_term: Option<bool>
 }
 
+#[inline]
 pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 	vec.clear();
-	vec.reserve(size.saturating_sub(vec.len()));
-	for _ in 0..size {
-		vec.push(T::default());
-	}
+	vec.resize_with(size, T::default);
 }
 
 // this function has to be sync (non-async) because the mupdf::Document needs to be held during
@@ -141,7 +139,7 @@ pub fn start_rendering(
 		// `split_at_mut` at 0 initially (which bascially makes `right == rendered && left == []`),
 		// doing basically nothing, but if we get a notification that something has been jumped to,
 		// then we can split at that page and render at both sides of it
-		let mut rendered = vec![];
+		let mut rendered = Vec::new();
 		fill_default::<PrevRender>(&mut rendered, n_pages);
 		let mut start_point = 0;
 

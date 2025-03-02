@@ -71,14 +71,6 @@ pub fn start_rendering(
 	receiver: Receiver<RenderNotif>,
 	size: WindowSize
 ) -> Result<(), SendError<Result<RenderInfo, RenderError>>> {
-	// first, wait 'til we get told what the current starting area is so that we can set it to
-	// know what to render to
-	let mut area = loop {
-		if let RenderNotif::Area(r) = receiver.recv().unwrap() {
-			break r;
-		}
-	};
-
 	// We want this outside of 'reload so that if the doc reloads, the search term that somebody
 	// set will still get highlighted in the reloaded doc
 	let mut search_term = None;
@@ -90,6 +82,7 @@ pub fn start_rendering(
 
 	let mut stored_doc = None;
 	let mut invert = false;
+	let mut preserved_area = None;
 
 	'reload: loop {
 		let doc = match Document::open(path) {
@@ -143,6 +136,21 @@ pub fn start_rendering(
 		fill_default::<PrevRender>(&mut rendered, n_pages);
 		let mut start_point = 0;
 
+		// next, we gotta wait 'til we get told what the current starting area is so that we can
+		// set it to know what to render to
+		let area = match preserved_area {
+			Some(a) => a,
+			None => {
+				let new_area = loop {
+					if let RenderNotif::Area(r) = receiver.recv().unwrap() {
+						break r;
+					}
+				};
+				preserved_area = Some(new_area);
+				new_area
+			}
+		};
+
 		// This is kinda a weird way of doing this, but if we get a notification that the area
 		// changed, we want to start re-rending all of the pages, but we don't want to reload the
 		// document. If there was a mechanism to say 'start this for-loop over' then I would do
@@ -164,7 +172,7 @@ pub fn start_rendering(
 						RenderNotif::Area(new_area) => {
 							let bigger =
 								new_area.width > area.width || new_area.height > area.height;
-							area = new_area;
+							preserved_area = Some(new_area);
 							// we only want to re-render pages if the new area is greater than the old
 							// one, 'cause then we might need sharper images to make it all look good.
 							// If the new area is smaller, then the same high-quality-rendered images

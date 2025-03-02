@@ -16,8 +16,9 @@ use ratatui::{
 	Frame,
 	layout::{Constraint, Flex, Layout, Rect},
 	style::{Color, Style},
-	text::Span,
-	widgets::{Block, Borders, Padding}
+	symbols::border,
+	text::{Span, Text},
+	widgets::{Block, Borders, Clear, Padding}
 };
 use ratatui_image::{Image, protocol::Protocol};
 
@@ -32,7 +33,8 @@ pub struct Tui {
 	// jumping to a specific page
 	prev_msg: Option<BottomMessage>,
 	rendered: Vec<RenderedInfo>,
-	page_constraints: PageConstraints
+	page_constraints: PageConstraints,
+	showing_help_msg: bool
 }
 
 #[derive(Default, Debug)]
@@ -86,7 +88,8 @@ impl Tui {
 			bottom_msg: BottomMessage::Help,
 			last_render: LastRender::default(),
 			rendered: vec![],
-			page_constraints: PageConstraints { max_wide, r_to_l }
+			page_constraints: PageConstraints { max_wide, r_to_l },
+			showing_help_msg: false
 		}
 	}
 
@@ -104,6 +107,11 @@ impl Tui {
 
 	// TODO: Make a way to fill the width of the screen with one page and scroll down to view it
 	pub fn render(&mut self, frame: &mut Frame<'_>, main_area: &[Rect]) {
+		if self.showing_help_msg {
+			self.render_help_msg(frame);
+			return;
+		}
+
 		let top_block = Block::new()
 			.padding(Padding {
 				right: 2,
@@ -161,10 +169,7 @@ impl Tui {
 		frame.render_widget(rendered_span, bottom_layout[1]);
 
 		let (msg_str, color): (Cow<'_, str>, _) = match self.bottom_msg {
-			BottomMessage::Help => (
-				"/: Search, g: Go To Page, n: Next Search Result, N: Previous Search Result".into(),
-				Color::Blue
-			),
+			BottomMessage::Help => ("?: Show help page".into(), Color::Blue),
 			BottomMessage::Error(ref e) => (e.as_str().into(), Color::Red),
 			BottomMessage::Input(ref input_state) => (
 				match input_state {
@@ -415,6 +420,10 @@ impl Tui {
 								Some(InputAction::Redraw)
 							}
 							'i' => Some(InputAction::Invert),
+							'?' => {
+								self.showing_help_msg = true;
+								Some(InputAction::Redraw)
+							}
 							'n' if self.page < self.rendered.len() - 1 => {
 								// TODO: If we can't find one, then maybe like block until we've verified
 								// all the pages have been checked?
@@ -486,8 +495,8 @@ impl Tui {
 					KeyCode::Down => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
 					KeyCode::Left => self.change_page(PageChange::Prev, ChangeAmount::Single),
 					KeyCode::Up => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-					KeyCode::Esc => match self.bottom_msg {
-						BottomMessage::Help => Some(InputAction::QuitApp),
+					KeyCode::Esc => match (self.showing_help_msg, &self.bottom_msg) {
+						(false, BottomMessage::Help) => Some(InputAction::QuitApp),
 						_ => {
 							// When we hit escape, we just want to pop off the current message and
 							// show the underlying one.
@@ -598,10 +607,80 @@ impl Tui {
 				self.prev_msg = None;
 				self.bottom_msg = BottomMessage::default();
 			}
-			MessageSetting::Pop => self.bottom_msg = self.prev_msg.take().unwrap_or_default()
+			MessageSetting::Pop =>
+				if self.showing_help_msg {
+					self.last_render.rect = Rect::default();
+					self.showing_help_msg = false;
+				} else {
+					self.bottom_msg = self.prev_msg.take().unwrap_or_default();
+				},
 		}
 	}
+
+	pub fn render_help_msg(&self, frame: &mut Frame<'_>) {
+		let frame_area = frame.area();
+		frame.render_widget(Clear, frame_area);
+
+		let block = Block::new()
+			.title("Help")
+			.padding(Padding::proportional(1))
+			.borders(Borders::ALL)
+			.border_set(border::ROUNDED)
+			.border_style(Color::Blue);
+
+		let help_span = Text::raw(HELP_PAGE);
+
+		let max_w: u16 = HELP_PAGE
+			.lines()
+			.map(str::len)
+			.max()
+			.unwrap_or_default()
+			.try_into()
+			.expect("Every help text line must be shorter than u16::MAX");
+
+		let layout = Layout::horizontal([
+			Constraint::Fill(1),
+			Constraint::Length(max_w + 6),
+			Constraint::Fill(1)
+		])
+		.split(frame_area);
+
+		let block_area = Layout::vertical([
+			Constraint::Fill(1),
+			Constraint::Length(u16::try_from(HELP_PAGE.lines().count()).unwrap() + 4),
+			Constraint::Fill(1)
+		])
+		.split(layout[1]);
+
+		let block_inner = block.inner(block_area[1]);
+
+		frame.render_widget(block, block_area[1]);
+		frame.render_widget(help_span, block_inner);
+	}
 }
+
+static HELP_PAGE: &str = "\
+l, h, left, right:
+    Go forward/backwards a single page
+j, k, down, up:
+    Go forwards/backwards a screen's worth of pages
+q, esc:
+    Quit
+g:
+    Go to specific page (type numbers after 'g')
+/:
+    Search
+n, N:
+    Next/Previous search result
+i:
+    Invert colors
+f:
+    Remove borders/fullscreen
+?:
+    Show this page
+ctrl+z:
+    Suspend & background tdf \
+";
 
 pub enum InputAction {
 	Redraw,

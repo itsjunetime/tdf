@@ -1,4 +1,4 @@
-use std::{borrow::Cow, io::stdout, num::NonZeroUsize, rc::Rc};
+use std::{borrow::Cow, io::stdout, num::NonZeroUsize};
 
 use crossterm::{
 	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
@@ -79,6 +79,12 @@ struct RenderedInfo {
 	num_results: Option<usize>
 }
 
+#[derive(PartialEq)]
+pub struct RenderLayout {
+	pub page_area: Rect,
+	pub top_and_bottom: Option<(Rect, Rect)>
+}
+
 impl Tui {
 	pub fn new(name: String, max_wide: Option<NonZeroUsize>, r_to_l: bool) -> Tui {
 		Self {
@@ -93,119 +99,133 @@ impl Tui {
 		}
 	}
 
-	pub fn main_layout(frame: &Frame<'_>) -> Rc<[Rect]> {
-		Layout::default()
-			.constraints([
-				Constraint::Length(3),
-				Constraint::Fill(1),
-				Constraint::Length(3)
-			])
-			.horizontal_margin(2)
-			.vertical_margin(1)
-			.split(frame.area())
+	pub fn main_layout(frame: &Frame<'_>, fullscreened: bool) -> RenderLayout {
+		if fullscreened {
+			RenderLayout {
+				page_area: frame.area(),
+				top_and_bottom: None
+			}
+		} else {
+			let layout = Layout::default()
+				.constraints([
+					Constraint::Length(3),
+					Constraint::Fill(1),
+					Constraint::Length(3)
+				])
+				.horizontal_margin(2)
+				.vertical_margin(1)
+				.split(frame.area());
+
+			RenderLayout {
+				page_area: layout[1],
+				top_and_bottom: Some((layout[0], layout[2]))
+			}
+		}
 	}
 
 	// TODO: Make a way to fill the width of the screen with one page and scroll down to view it
-	pub fn render(&mut self, frame: &mut Frame<'_>, main_area: &[Rect]) {
+	pub fn render(&mut self, frame: &mut Frame<'_>, full_layout: &RenderLayout) {
 		if self.showing_help_msg {
 			self.render_help_msg(frame);
 			return;
 		}
 
-		let top_block = Block::new()
-			.padding(Padding {
-				right: 2,
-				left: 2,
-				..Padding::default()
-			})
-			.borders(Borders::BOTTOM);
+		if let Some((top_area, bottom_area)) = full_layout.top_and_bottom {
+			let top_block = Block::new()
+				.padding(Padding {
+					right: 2,
+					left: 2,
+					..Padding::default()
+				})
+				.borders(Borders::BOTTOM);
 
-		let top_area = top_block.inner(main_area[0]);
+			let top_area = top_block.inner(top_area);
 
-		let page_nums_text = format!("{} / {}", self.page + 1, self.rendered.len());
+			let page_nums_text = format!("{} / {}", self.page + 1, self.rendered.len());
 
-		let top_layout = Layout::horizontal([
-			Constraint::Fill(1),
-			Constraint::Length(page_nums_text.len() as u16)
-		])
-		.split(top_area);
+			let top_layout = Layout::horizontal([
+				Constraint::Fill(1),
+				Constraint::Length(page_nums_text.len() as u16)
+			])
+			.split(top_area);
 
-		let title = Span::styled(&self.name, Style::new().fg(Color::Cyan));
+			let title = Span::styled(&self.name, Style::new().fg(Color::Cyan));
 
-		let page_nums = Span::styled(&page_nums_text, Style::new().fg(Color::Cyan));
+			let page_nums = Span::styled(&page_nums_text, Style::new().fg(Color::Cyan));
 
-		frame.render_widget(top_block, main_area[0]);
-		frame.render_widget(title, top_layout[0]);
-		frame.render_widget(page_nums, top_layout[1]);
+			frame.render_widget(top_block, top_area);
+			frame.render_widget(title, top_layout[0]);
+			frame.render_widget(page_nums, top_layout[1]);
 
-		let bottom_block = Block::new()
-			.padding(Padding {
-				top: 1,
-				right: 2,
-				left: 2,
-				bottom: 0
-			})
-			.borders(Borders::TOP);
-		let bottom_area = bottom_block.inner(main_area[2]);
+			let bottom_block = Block::new()
+				.padding(Padding {
+					top: 1,
+					right: 2,
+					left: 2,
+					bottom: 0
+				})
+				.borders(Borders::TOP);
+			let bottom_inside_block = bottom_block.inner(bottom_area);
 
-		frame.render_widget(bottom_block, main_area[2]);
+			frame.render_widget(bottom_block, bottom_area);
 
-		let rendered_str = if !self.rendered.is_empty() {
-			format!(
-				"Rendered: {}%",
-				(self.rendered.iter().filter(|i| i.img.is_some()).count() * 100)
-					/ self.rendered.len()
-			)
-		} else {
-			String::new()
-		};
-		let bottom_layout = Layout::horizontal([
-			Constraint::Fill(1),
-			Constraint::Length(rendered_str.len() as u16)
-		])
-		.split(bottom_area);
+			let rendered_str = if !self.rendered.is_empty() {
+				format!(
+					"Rendered: {}%",
+					(self.rendered.iter().filter(|i| i.img.is_some()).count() * 100)
+						/ self.rendered.len()
+				)
+			} else {
+				String::new()
+			};
+			let bottom_layout = Layout::horizontal([
+				Constraint::Fill(1),
+				Constraint::Length(rendered_str.len() as u16)
+			])
+			.split(bottom_inside_block);
 
-		let rendered_span = Span::styled(&rendered_str, Style::new().fg(Color::Cyan));
-		frame.render_widget(rendered_span, bottom_layout[1]);
+			let rendered_span = Span::styled(&rendered_str, Style::new().fg(Color::Cyan));
+			frame.render_widget(rendered_span, bottom_layout[1]);
 
-		let (msg_str, color): (Cow<'_, str>, _) = match self.bottom_msg {
-			BottomMessage::Help => ("?: Show help page".into(), Color::Blue),
-			BottomMessage::Error(ref e) => (e.as_str().into(), Color::Red),
-			BottomMessage::Input(ref input_state) => (
-				match input_state {
-					InputCommand::GoToPage(page) => format!("Go to: {page}"),
-					InputCommand::Search(s) => format!("Search: {s}")
-				}
-				.into(),
-				Color::Blue
-			),
-			BottomMessage::SearchResults(ref term) => {
-				let num_found = self
-					.rendered
-					.iter()
-					.filter_map(|r| r.num_results)
-					.sum::<usize>();
-				let num_searched = self
-					.rendered
-					.iter()
-					.filter(|r| r.num_results.is_some())
-					.count() * 100;
-				(
-					format!(
-						"Results for '{term}': {num_found} (searched: {}%)",
-						num_searched / self.rendered.len()
-					)
+			let (msg_str, color): (Cow<'_, str>, _) = match self.bottom_msg {
+				BottomMessage::Help => ("?: Show help page".into(), Color::Blue),
+				BottomMessage::Error(ref e) => (e.as_str().into(), Color::Red),
+				BottomMessage::Input(ref input_state) => (
+					match input_state {
+						InputCommand::GoToPage(page) => format!("Go to: {page}"),
+						InputCommand::Search(s) => format!("Search: {s}")
+					}
 					.into(),
 					Color::Blue
-				)
-			}
-			BottomMessage::Reloaded => ("Document was reloaded!".into(), Color::Blue)
-		};
+				),
+				BottomMessage::SearchResults(ref term) => {
+					let num_found = self
+						.rendered
+						.iter()
+						.filter_map(|r| r.num_results)
+						.sum::<usize>();
+					let num_searched = self
+						.rendered
+						.iter()
+						.filter(|r| r.num_results.is_some())
+						.count() * 100;
+					(
+						format!(
+							"Results for '{term}': {num_found} (searched: {}%)",
+							num_searched / self.rendered.len()
+						)
+						.into(),
+						Color::Blue
+					)
+				}
+				BottomMessage::Reloaded => ("Document was reloaded!".into(), Color::Blue)
+			};
 
-		let span = Span::styled(msg_str, Style::new().fg(color));
-		frame.render_widget(span, bottom_layout[0]);
+			let span = Span::styled(msg_str, Style::new().fg(color));
+			frame.render_widget(span, bottom_layout[0]);
+		}
 
-		let mut img_area = main_area[1];
+		let mut img_area = full_layout.page_area;
 
 		let size = frame.area();
 		if size == self.last_render.rect {
@@ -424,6 +444,7 @@ impl Tui {
 								self.showing_help_msg = true;
 								Some(InputAction::Redraw)
 							}
+							'f' => Some(InputAction::Fullscreen),
 							'n' if self.page < self.rendered.len() - 1 => {
 								// TODO: If we can't find one, then maybe like block until we've verified
 								// all the pages have been checked?
@@ -661,25 +682,25 @@ impl Tui {
 
 static HELP_PAGE: &str = "\
 l, h, left, right:
-    Go forward/backwards a single page
+	Go forward/backwards a single page
 j, k, down, up:
-    Go forwards/backwards a screen's worth of pages
+	Go forwards/backwards a screen's worth of pages
 q, esc:
-    Quit
+	Quit
 g:
-    Go to specific page (type numbers after 'g')
+	Go to specific page (type numbers after 'g')
 /:
-    Search
+	Search
 n, N:
-    Next/Previous search result
+	Next/Previous search result
 i:
-    Invert colors
+	Invert colors
 f:
-    Remove borders/fullscreen
+	Remove borders/fullscreen
 ?:
-    Show this page
+	Show this page
 ctrl+z:
-    Suspend & background tdf \
+	Suspend & background tdf \
 ";
 
 pub enum InputAction {
@@ -687,7 +708,8 @@ pub enum InputAction {
 	JumpingToPage(usize),
 	Search(String),
 	QuitApp,
-	Invert
+	Invert,
+	Fullscreen
 }
 
 #[derive(Copy, Clone)]

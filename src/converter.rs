@@ -49,7 +49,7 @@ pub async fn run_conversion_loop(
 		let Some((page_info, new_iter)) = (idx_start..page)
 			.interleave(page..idx_end)
 			.enumerate()
-			.skip(*iteration)
+			// .skip(*iteration)
 			.find_map(|(i_idx, p_idx)| images[p_idx].take().map(|p| (p, i_idx)))
 		else {
 			return Ok(None);

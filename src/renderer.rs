@@ -136,26 +136,26 @@ pub fn start_rendering(
 		fill_default::<PrevRender>(&mut rendered, n_pages);
 		let mut start_point = 0;
 
-		// next, we gotta wait 'til we get told what the current starting area is so that we can
-		// set it to know what to render to
-		let area = match preserved_area {
-			Some(a) => a,
-			None => {
-				let new_area = loop {
-					if let RenderNotif::Area(r) = receiver.recv().unwrap() {
-						break r;
-					}
-				};
-				preserved_area = Some(new_area);
-				new_area
-			}
-		};
-
 		// This is kinda a weird way of doing this, but if we get a notification that the area
 		// changed, we want to start re-rending all of the pages, but we don't want to reload the
 		// document. If there was a mechanism to say 'start this for-loop over' then I would do
 		// that, but I don't think such a thing exists, so this is our attempt
 		'render_pages: loop {
+			// next, we gotta wait 'til we get told what the current starting area is so that we can
+			// set it to know what to render to
+			let area = match preserved_area {
+				Some(a) => a,
+				None => {
+					let new_area = loop {
+						if let RenderNotif::Area(r) = receiver.recv().unwrap() {
+							break r;
+						}
+					};
+					preserved_area = Some(new_area);
+					new_area
+				}
+			};
+
 			// what we do with a notif is the same regardless of if we're in the middle of
 			// rendering the list of pages or we're all done
 			macro_rules! handle_notif {
@@ -170,17 +170,9 @@ pub fn start_rendering(
 							continue 'render_pages;
 						}
 						RenderNotif::Area(new_area) => {
-							let bigger =
-								new_area.width > area.width || new_area.height > area.height;
 							preserved_area = Some(new_area);
-							// we only want to re-render pages if the new area is greater than the old
-							// one, 'cause then we might need sharper images to make it all look good.
-							// If the new area is smaller, then the same high-quality-rendered images
-							// will still look fine, so it's ok to leave it.
-							if bigger {
-								fill_default(&mut rendered, n_pages);
-								continue 'render_pages;
-							}
+							fill_default(&mut rendered, n_pages);
+							continue 'render_pages;
 						}
 						RenderNotif::JumpToPage(page) => {
 							start_point = page;

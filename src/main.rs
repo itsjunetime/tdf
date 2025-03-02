@@ -45,6 +45,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		optional -r,--r-to-l r_to_l: bool
 		/// The maximum number of pages to display together, horizontally, at a time
 		optional -m,--max-wide max_wide: NonZeroUsize
+		/// Fullscreen the pdf (hide document name, page count, etc)
+		optional -f,--fullscreen fullscreen: bool
 		/// PDF file to read
 		required file: PathBuf
 	};
@@ -167,8 +169,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	)?;
 	enable_raw_mode()?;
 
-	let mut main_area = Tui::main_layout(&term.get_frame());
-	tui_tx.send(RenderNotif::Area(main_area[1]))?;
+	let mut fullscreen = flags.fullscreen.unwrap_or_default();
+	let mut main_area = Tui::main_layout(&term.get_frame(), fullscreen);
+	tui_tx.send(RenderNotif::Area(main_area.page_area))?;
 
 	let mut tui_rx = tui_rx.into_stream();
 	let mut from_converter = from_converter.into_stream();
@@ -191,7 +194,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 							to_converter.send(ConverterMsg::GoToPage(page))?;
 						},
 						InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term))?,
-						InputAction::Invert => tui_tx.send(RenderNotif::Invert)?
+						InputAction::Invert => tui_tx.send(RenderNotif::Invert)?,
+						InputAction::Fullscreen => fullscreen = !fullscreen,
 					}
 				}
 			},
@@ -219,10 +223,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			},
 		};
 
-		let new_area = Tui::main_layout(&term.get_frame());
+		let new_area = Tui::main_layout(&term.get_frame(), fullscreen);
 		if new_area != main_area {
 			main_area = new_area;
-			tui_tx.send(RenderNotif::Area(main_area[1]))?;
+			tui_tx.send(RenderNotif::Area(main_area.page_area))?;
 			needs_redraw = true;
 		}
 

@@ -1,6 +1,6 @@
 [package]
 name = "tdf-viewer"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["June Welker <junewelker@gmail.com>"]
 edition = "2024"
 description = "A terminal viewer for PDFs"

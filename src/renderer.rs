@@ -304,14 +304,12 @@ pub fn start_rendering(
 
 			// Then once we've rendered all these pages, wait until we get another notification
 			// that this doc needs to be reloaded
-			loop {
-				// This once returned None despite the main thing being still connected (I think, at
-				// least), so I'm just being safe here
-				let Ok(msg) = receiver.recv() else {
-					return Ok(());
-				};
-				handle_notif!(msg);
-			}
+			// This once returned None despite the main thing being still connected (I think, at
+			// least), so I'm just being safe here
+			let Ok(msg) = receiver.recv() else {
+				return Ok(());
+			};
+			handle_notif!(msg);
 		}
 	}
 }

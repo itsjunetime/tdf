@@ -1,6 +1,6 @@
 use std::{
 	ffi::OsString,
-	io::{Read, Write, stdout},
+	io::{stdout, BufReader, Read, Write},
 	num::NonZeroUsize,
 	path::PathBuf
 };
@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		enable_raw_mode()?;
 
 		// read in the returned size until we hit a 't' (which indicates to us it's done)
-		let input_vec = std::io::stdin()
+		let input_vec = BufReader::new(std::io::stdin())
 			.bytes()
 			.filter_map(Result::ok)
 			.take_while(|b| *b != b't')

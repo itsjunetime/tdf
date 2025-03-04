@@ -1,3 +1,7 @@
+# Unreleased
+
+- Update ratatui(-image) dependencies
+
 # v0.3.0
 
 - Update ratatui(-image) dependencies

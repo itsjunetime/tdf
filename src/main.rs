@@ -1,6 +1,6 @@
 use std::{
 	ffi::OsString,
-	io::{stdout, BufReader, Read, Write},
+	io::{BufReader, Read, Write, stdout},
 	num::NonZeroUsize,
 	path::PathBuf
 };

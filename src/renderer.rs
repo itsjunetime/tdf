@@ -1,10 +1,14 @@
-use std::{thread::sleep, time::Duration};
+use std::{num::NonZeroUsize, thread::sleep, time::Duration};
 
 use crossterm::terminal::WindowSize;
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use itertools::Itertools;
-use mupdf::{Colorspace, Document, Matrix, Page, Pixmap, TextPageOptions};
+use mupdf::{
+	Colorspace, Document, Matrix, Page, Pixmap, Quad, TextPageOptions, text_page::SearchHitResponse
+};
 use ratatui::layout::Rect;
+
+use crate::PrerenderLimit;
 
 pub enum RenderNotif {
 	Area(Rect),
@@ -24,6 +28,7 @@ pub enum RenderError {
 pub enum RenderInfo {
 	NumPages(usize),
 	Page(PageInfo),
+	SearchResults { page_num: usize, num_results: usize },
 	Reloaded
 }
 
@@ -43,7 +48,15 @@ pub struct ImageData {
 #[derive(Default)]
 struct PrevRender {
 	successful: bool,
-	contained_term: Option<bool>
+	contained_term: PageSearchResult
+}
+
+#[derive(Default, PartialEq)]
+enum PageSearchResult {
+	#[default]
+	Unknown,
+	DidNotContain,
+	Contained(NonZeroUsize)
 }
 
 #[inline]
@@ -69,7 +82,8 @@ pub fn start_rendering(
 	path: &str,
 	sender: Sender<Result<RenderInfo, RenderError>>,
 	receiver: Receiver<RenderNotif>,
-	size: WindowSize
+	size: WindowSize,
+	prerender: PrerenderLimit
 ) -> Result<(), SendError<Result<RenderInfo, RenderError>>> {
 	// We want this outside of 'reload so that if the doc reloads, the search term that somebody
 	// set will still get highlighted in the reloaded doc
@@ -159,7 +173,7 @@ pub fn start_rendering(
 			// what we do with a notif is the same regardless of if we're in the middle of
 			// rendering the list of pages or we're all done
 			macro_rules! handle_notif {
-				($notif:ident) => {
+				($notif:ident) => {{
 					match $notif {
 						RenderNotif::Reload => continue 'reload,
 						RenderNotif::Invert => {
@@ -184,7 +198,8 @@ pub fn start_rendering(
 								// the pages wherein there were already no search results. So this
 								// is a little optimization to allow that.
 								for page in &mut rendered {
-									if !page.successful || page.contained_term != Some(true) {
+									if let PageSearchResult::Contained(_) = page.contained_term {
+										page.contained_term = PageSearchResult::DidNotContain;
 										page.successful = false;
 									}
 								}
@@ -195,28 +210,43 @@ pub fn start_rendering(
 								// term, we can render them with the term, but if they don't, we
 								// don't need to re-render and send it over again.
 								for page in &mut rendered {
-									page.contained_term = None;
+									page.contained_term = PageSearchResult::Unknown;
 								}
 								search_term = Some(term);
 							}
 							continue 'render_pages;
 						}
 					}
-				};
+				}};
 			}
 
 			let (left, right) = rendered.split_at_mut(start_point);
 
+			// This is our iterator over all the pages we want to look at and render. It uses this
+			// weird 'interleave' thing to render pages on *both sides* of the currently-displayed
+			// page in case they device to go forward or backwards.
 			let page_iter = right
 				.iter_mut()
 				.enumerate()
-				.map(|(idx, p)| (idx + start_point, p))
+				.map(move |(idx, p)| (idx + start_point, p))
 				.interleave(
 					left.iter_mut()
 						.rev()
 						.enumerate()
-						.map(|(idx, p)| (start_point - (idx + 1), p))
-				);
+						.map(move |(idx, p)| (start_point - (idx + 1), p))
+				)
+				.take(match (&prerender, &search_term) {
+					// If the user has limited the amount of pages they want to prerender, then we
+					// just do what they ask. Nice and easy.
+					(PrerenderLimit::Limited(l), _) => l.get(),
+					// If they haven't limited it, but we don't have any search term that we're
+					// currently looking for, just go for all of it
+					(PrerenderLimit::All, None) => n_pages,
+					// If they haven't limited it, and we DO have a search term we need to look
+					// for, just do 20 so that we don't dramatically slow down the search process
+					// since they've specifically initiated that and so we want it to take priority
+					(PrerenderLimit::All, Some(_)) => 20
+				});
 
 			let area_w = f32::from(area.width) * f32::from(col_w);
 			let area_h = f32::from(area.height) * f32::from(col_h);
@@ -225,10 +255,9 @@ pub fn start_rendering(
 			for (num, rendered) in page_iter {
 				// we only want to continue if one of the following is met:
 				// 1. It failed to render last time (we want to retry)
-				// 2. The `contained_term` is set to None (representing 'Unknown'), meaning that we
-				//	  need to at least check if it contains the current term to see if it needs a
-				//	  re-render
-				if rendered.successful && rendered.contained_term.is_some() {
+				// 2. The `contained_term` is set to Unknown, meaning that we need to at least
+				//    check if it contains the current term to see if it needs a re-render
+				if rendered.successful && rendered.contained_term != PageSearchResult::Unknown {
 					continue;
 				}
 
@@ -251,14 +280,11 @@ pub fn start_rendering(
 					Ok(p) => p
 				};
 
-				let rendered_with_no_results =
-					rendered.successful && rendered.contained_term == Some(false);
-
 				// render the page
 				match render_single_page_to_ctx(
 					&page,
 					search_term.as_deref(),
-					rendered_with_no_results,
+					rendered,
 					invert,
 					(area_w, area_h)
 				) {
@@ -271,7 +297,8 @@ pub fn start_rendering(
 						// we make a potentially incorrect assumption here that writing the context
 						// to a png won't fail, and mark that it all rendered correctly here before
 						// spawning off the thread to do so and send it.
-						rendered.contained_term = Some(ctx.result_rects.is_empty());
+						rendered.contained_term = NonZeroUsize::new(ctx.result_rects.len())
+							.map_or(PageSearchResult::DidNotContain, PageSearchResult::Contained);
 						rendered.successful = true;
 
 						let w = ctx.pixmap.width();
@@ -302,6 +329,74 @@ pub fn start_rendering(
 				}
 			}
 
+			// Now, if we have a search term, we want to look through the rest of the document past
+			// what we've just rendered (and looked at the search results of)
+			if let Some(ref term) = search_term {
+				let mut search_start = start_point;
+				loop {
+					// hmm maybe this would be nice to make configurable but whatever
+					const SEARCH_AT_TIME: usize = 20;
+
+					// So now we want to look through all the remaining pages, starting after this
+					// current one (we don't do interleaving here 'cause I'm lazy
+					let page_idx = rendered[search_start..]
+						.iter_mut()
+						.enumerate()
+						// And we only want to take max SEARCH_AT_TIME of them since we don't want
+						// to block on this for *too* long
+						.take(SEARCH_AT_TIME)
+						// We want to remove all the ones that we've already determined did not
+						// contain the current term...
+						.filter(|(_, r)| r.contained_term != PageSearchResult::DidNotContain)
+						// And then adjust the index to be correct for the actual page number
+						.map(|(idx, r)| (idx + search_start, r));
+
+					// then we go through each...
+					for (page_num, rendered) in page_idx {
+						// We get the number of results (using the function that specifically just
+						// counts them instead of determining the quads of them all)
+						let num_results = doc
+							.load_page(page_num as i32)
+							.and_then(|page| count_search_results(&page, term))
+							.unwrap();
+
+						// Mark the `contained_term` field with this updated value...
+						rendered.contained_term = NonZeroUsize::new(num_results)
+							.map_or(PageSearchResult::DidNotContain, PageSearchResult::Contained);
+
+						// And send it over to the tui so that they can know and use it to
+						// determine what next page to jump to
+						sender.send(Ok(RenderInfo::SearchResults {
+							page_num,
+							num_results
+						}))?;
+					}
+
+					// then once we're done with this iteration, we increment search_start to
+					// prepare for the next iteration
+					search_start += SEARCH_AT_TIME;
+
+					// now, we want to check if we've gone past the end - if so, we go back to the
+					// beginning so we can get the pages before the current one.
+					if search_start > n_pages {
+						search_start = 0;
+					} else if ((search_start - SEARCH_AT_TIME) + 1..search_start)
+						.contains(&start_point)
+					{
+						// And if we are back at the place we started, we've looked through all the
+						// pages. Quit.
+						break;
+					}
+
+					match receiver.try_recv() {
+						// If there are no messages left for us, just continue in this loop
+						Err(TryRecvError::Empty) => (),
+						Err(TryRecvError::Disconnected) => return Ok(()),
+						Ok(msg) => handle_notif!(msg)
+					}
+				}
+			}
+
 			// Then once we've rendered all these pages, wait until we get another notification
 			// that this doc needs to be reloaded
 			// This once returned None despite the main thing being still connected (I think, at
@@ -309,7 +404,8 @@ pub fn start_rendering(
 			let Ok(msg) = receiver.recv() else {
 				return Ok(());
 			};
-			handle_notif!(msg);
+
+			handle_notif!(msg)
 		}
 	}
 }
@@ -324,23 +420,15 @@ struct RenderedContext {
 fn render_single_page_to_ctx(
 	page: &Page,
 	search_term: Option<&str>,
-	already_rendered_no_results: bool,
+	prev_render: &PrevRender,
 	invert: bool,
 	(area_w, area_h): (f32, f32)
 ) -> Result<Option<RenderedContext>, mupdf::error::Error> {
-	let result_rects = search_term
-		.map(|term| {
-			page.to_text_page(TextPageOptions::empty())
-				.and_then(|page| page.search(term))
-		})
-		.transpose()?
-		.unwrap_or_default();
-
-	// If there are no search terms on this page, and we've already rendered it with no search
-	// terms, then just return none to avoid this computation
-	if result_rects.is_empty() && already_rendered_no_results {
-		return Ok(None);
-	}
+	let result_rects = match prev_render.contained_term {
+		PageSearchResult::Unknown => search_page(page, search_term, None)?,
+		PageSearchResult::DidNotContain => Vec::new(),
+		PageSearchResult::Contained(count) => search_page(page, search_term, Some(count))?
+	};
 
 	// then, get the size of the page
 	let bounds = page.bounds()?;
@@ -412,4 +500,40 @@ pub struct HighlightRect {
 	pub ul_y: u32,
 	pub lr_x: u32,
 	pub lr_y: u32
+}
+
+#[inline]
+fn search_page(
+	page: &Page,
+	search_term: Option<&str>,
+	trusted_search_results: Option<NonZeroUsize>
+) -> Result<Vec<Quad>, mupdf::error::Error> {
+	search_term
+		.map(|term| {
+			page.to_text_page(TextPageOptions::empty())
+				.and_then(|page| {
+					let mut v =
+						Vec::with_capacity(trusted_search_results.map_or(0, NonZeroUsize::get));
+					page.search_cb(term, &mut v, |v, results| {
+						v.extend(results.iter().cloned());
+						SearchHitResponse::ContinueSearch
+					})
+					.map(|_| v)
+				})
+		})
+		.transpose()
+		.map(Option::unwrap_or_default)
+}
+
+#[inline]
+fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::error::Error> {
+	page.to_text_page(TextPageOptions::empty())
+		.and_then(|page| {
+			let mut count = 0;
+			page.search_cb(search_term, &mut count, |count, results| {
+				*count += results.len();
+				SearchHitResponse::ContinueSearch
+			})?;
+			Ok(count)
+		})
 }

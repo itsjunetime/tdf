@@ -10,7 +10,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main, profile
 use futures_util::StreamExt;
 use tdf::{
 	converter::{ConvertedPage, ConverterMsg},
-	renderer::{fill_default, PageInfo, RenderInfo}
+	renderer::{PageInfo, RenderInfo, fill_default}
 };
 use utils::{
 	RenderState, handle_converter_msg, handle_renderer_msg, render_doc, start_all_rendering,
@@ -120,7 +120,7 @@ async fn render_all_files(path: &'static str) -> Vec<PageInfo> {
 
 	while let Some(info) = from_render_rx.next().await {
 		match info.expect("Renderer ran into an error while rendering") {
-			RenderInfo::Reloaded => (),
+			RenderInfo::Reloaded | RenderInfo::SearchResults { .. } => (),
 			RenderInfo::NumPages(num) => fill_default(&mut pages, num),
 			RenderInfo::Page(page) => {
 				let num = page.page_num;

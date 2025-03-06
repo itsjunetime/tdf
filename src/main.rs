@@ -17,6 +17,7 @@ use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use ratatui_image::picker::Picker;
 use tdf::{
+	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
@@ -47,6 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		optional -m,--max-wide max_wide: NonZeroUsize
 		/// Fullscreen the pdf (hide document name, page count, etc)
 		optional -f,--fullscreen fullscreen: bool
+		/// The number of pages to prerender surrounding the currently-shown page; 0 means no
+		/// limit. By default, there is no limit.
+		optional -p,--prerender prerender: usize
 		/// PDF file to read
 		required file: PathBuf
 	};
@@ -141,8 +145,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// then we want to spawn off the rendering task
 	// We need to use the thread::spawn API so that this exists in a thread not owned by tokio,
 	// since the methods we call in `start_rendering` will panic if called in an async context
+	let prerender = flags
+		.prerender
+		.and_then(NonZeroUsize::new)
+		.map_or(PrerenderLimit::All, PrerenderLimit::Limited);
 	std::thread::spawn(move || {
-		renderer::start_rendering(&file_path, render_tx, render_rx, window_size)
+		renderer::start_rendering(&file_path, render_tx, render_rx, window_size, prerender)
 	});
 
 	let mut ev_stream = crossterm::event::EventStream::new();
@@ -211,6 +219,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 							to_converter.send(ConverterMsg::AddImg(info))?;
 						},
 						RenderInfo::Reloaded => tui.set_msg(MessageSetting::Some(BottomMessage::Reloaded)),
+						RenderInfo::SearchResults { page_num, num_results } =>
+							tui.got_num_results_on_page(page_num, num_results),
 					},
 					Err(e) => tui.show_error(e),
 				}

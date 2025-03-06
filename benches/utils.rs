@@ -21,8 +21,8 @@ pub fn handle_renderer_msg(
 			to_converter_tx.send(ConverterMsg::NumPages(num)).unwrap();
 		}
 		Ok(RenderInfo::Page(info)) => to_converter_tx.send(ConverterMsg::AddImg(info)).unwrap(),
-		// We can ignore the `Reloaded` variant 'cause that's only used to send info to the TUI
-		Ok(RenderInfo::Reloaded) => (),
+		// We can ignore the these variants 'cause they're only used to send info to the TUI
+		Ok(RenderInfo::Reloaded | RenderInfo::SearchResults { .. }) => (),
 		Err(e) => panic!("Got error from renderer: {e:?}")
 	}
 }
@@ -77,7 +77,15 @@ pub fn start_rendering_loop(
 		width: columns * FONT_SIZE.0
 	};
 
-	std::thread::spawn(move || start_rendering(&str_path, to_main_tx, from_main_rx, size));
+	std::thread::spawn(move || {
+		start_rendering(
+			&str_path,
+			to_main_tx,
+			from_main_rx,
+			size,
+			tdf::PrerenderLimit::All
+		)
+	});
 
 	let main_area = Rect {
 		x: 0,
@@ -139,7 +147,9 @@ pub async fn render_doc(path: impl AsRef<Path>, search_term: Option<&str>) {
 	} = start_all_rendering(path);
 
 	if let Some(term) = search_term {
-		to_render_tx.send(RenderNotif::Search(term.to_owned())).unwrap();
+		to_render_tx
+			.send(RenderNotif::Search(term.to_owned()))
+			.unwrap();
 	}
 
 	while pages.is_empty() || pages.iter().any(Option::is_none) {

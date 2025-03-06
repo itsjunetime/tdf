@@ -1,6 +1,7 @@
 # Unreleased
 
 - Update ratatui(-image) dependencies
+- Use new mupdf search API for slightly better performance
 
 # v0.3.0
 

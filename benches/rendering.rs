@@ -10,7 +10,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main, profile
 use futures_util::StreamExt;
 use tdf::{
 	converter::{ConvertedPage, ConverterMsg},
-	renderer::{PageInfo, RenderInfo, fill_default}
+	renderer::{fill_default, PageInfo, RenderInfo}
 };
 use utils::{
 	RenderState, handle_converter_msg, handle_renderer_msg, render_doc, start_all_rendering,
@@ -27,7 +27,7 @@ fn render_full(c: &mut Criterion) {
 	for file in FILES {
 		c.bench_with_input(BenchmarkId::new("render_full", file), &file, |b, &file| {
 			b.to_async(tokio::runtime::Runtime::new().unwrap())
-				.iter(|| render_doc(file))
+				.iter(|| render_doc(file, None))
 		});
 	}
 }
@@ -56,6 +56,32 @@ fn only_converting(c: &mut Criterion) {
 			|b, (rendered, _)| {
 				b.to_async(tokio::runtime::Runtime::new().unwrap())
 					.iter_with_setup(|| rendered.clone(), convert_all_files)
+			}
+		);
+	}
+}
+
+fn search_short_common(c: &mut Criterion) {
+	for file in FILES {
+		c.bench_with_input(
+			BenchmarkId::new("search_short_common", file),
+			&file,
+			|b, &file| {
+				b.to_async(tokio::runtime::Runtime::new().unwrap())
+					.iter(|| render_doc(file, Some("an")))
+			}
+		);
+	}
+}
+
+fn search_long_rare(c: &mut Criterion) {
+	for file in FILES {
+		c.bench_with_input(
+			BenchmarkId::new("search_long_rare", file),
+			&file,
+			|b, &file| {
+				b.to_async(tokio::runtime::Runtime::new().unwrap())
+					.iter(|| render_doc(file, Some("this is long and rare")))
 			}
 		);
 	}
@@ -175,6 +201,6 @@ impl Profiler for CpuProfiler {
 criterion_group!(
 	name = benches;
 	config = Criterion::default().sample_size(40).with_profiler(CpuProfiler);
-	targets = render_full, render_to_first_page, only_converting
+	targets = render_full, render_to_first_page, only_converting, search_short_common, search_long_rare
 );
 criterion_main!(benches);

@@ -129,7 +129,7 @@ pub fn start_all_rendering(path: impl AsRef<Path>) -> RenderState {
 	}
 }
 
-pub async fn render_doc(path: impl AsRef<Path>) {
+pub async fn render_doc(path: impl AsRef<Path>, search_term: Option<&str>) {
 	let RenderState {
 		mut from_render_rx,
 		mut from_converter_rx,
@@ -137,6 +137,10 @@ pub async fn render_doc(path: impl AsRef<Path>) {
 		mut to_converter_tx,
 		to_render_tx
 	} = start_all_rendering(path);
+
+	if let Some(term) = search_term {
+		to_render_tx.send(RenderNotif::Search(term.to_owned())).unwrap();
+	}
 
 	while pages.is_empty() || pages.iter().any(Option::is_none) {
 		tokio::select! {

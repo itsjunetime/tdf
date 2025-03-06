@@ -3,7 +3,7 @@ use std::{thread::sleep, time::Duration};
 use crossterm::terminal::WindowSize;
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use itertools::Itertools;
-use mupdf::{Colorspace, Document, Matrix, Page, Pixmap};
+use mupdf::{Colorspace, Document, Matrix, Page, Pixmap, TextPageOptions};
 use ratatui::layout::Rect;
 
 pub enum RenderNotif {
@@ -328,25 +328,13 @@ fn render_single_page_to_ctx(
 	invert: bool,
 	(area_w, area_h): (f32, f32)
 ) -> Result<Option<RenderedContext>, mupdf::error::Error> {
-	let mut max_hits = 10;
-	let result_rects = loop {
-		let rects = search_term
-			.as_ref()
-			// mupdf allocates a buffer of the size we give it to try to fill it with results. If we
-			// pass in u32::MAX, it allocates too much memory to function. If we pass too small of a
-			// number in, we may miss out on some of the results. Ideally, we'd like to make a better
-			// interface than this, but we're stuck with this kinda ugly looping until we make sure
-			// that we've found every instance of it on this page.
-			.map(|term| page.search(term, max_hits))
-			.transpose()?
-			.unwrap_or_default();
-
-		if rects.len() < (max_hits as usize) {
-			break rects;
-		}
-
-		max_hits *= 2;
-	};
+	let result_rects = search_term
+		.map(|term| {
+			page.to_text_page(TextPageOptions::empty())
+				.and_then(|page| page.search(term))
+		})
+		.transpose()?
+		.unwrap_or_default();
 
 	// If there are no search terms on this page, and we've already rendered it with no search
 	// terms, then just return none to avoid this computation

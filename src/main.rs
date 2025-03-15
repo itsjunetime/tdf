@@ -110,32 +110,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		disable_raw_mode()?;
 
 		let input_line = String::from_utf8(input_vec)?;
+		let input_line = input_line.trim_start_matches("\x1b[4").trim_start_matches(';');
 
-		if input_line.starts_with("\x1b[4;") {
-			// it should input it to us as `\e[4;<height>;<width>t`, so we need to split to get the h/w
-			// ignore the first val
-			let mut splits = input_line.split([';', 't']).skip(1);
+		// it should input it to us as `\e[4;<height>;<width>t`, so we need to split to get the h/w
+		// ignore the first val
+		let mut splits = input_line.split([';', 't']);
 
-			window_size.height = splits
-				.next()
-				.ok_or_else(|| {
-					BadTermSizeStdin(format!(
-						"Terminal responded with unparseable size response '{input_line}'"
-					))
-				})?
-				.parse::<u16>()?;
+		let (Some(h), Some(w)) = (splits.next(), splits.next()) else {
+			return Err(BadTermSizeStdin(format!(
+				"Terminal responded with unparseable size response '{input_line}'"
+			)).into());
+		};
 
-			window_size.width = splits
-				.next()
-				.ok_or_else(|| {
-					BadTermSizeStdin(format!(
-						"Terminal responded with unparseable size response '{input_line}'"
-					))
-				})?
-				.parse::<u16>()?;
-		} else {
-			return Err("Your terminal is falsely reporting a window size of 0; tdf needs an accurate window size to display graphics".into());
-		}
+		window_size.height = h.parse::<u16>()?;
+		window_size.width = w.parse::<u16>()?;
 	}
 
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,

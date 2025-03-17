@@ -2,6 +2,7 @@ use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt;
 use image::DynamicImage;
 use itertools::Itertools;
+use ratatui::layout::Rect;
 use ratatui_image::{Resize, picker::Picker, protocol::Protocol};
 use rayon::iter::ParallelIterator;
 
@@ -73,7 +74,12 @@ pub async fn run_conversion_loop(
 			_ => unreachable!()
 		};
 
-		let img_area = page_info.img_data.cell_area;
+		let img_area = Rect {
+			width: page_info.img_data.cell_w,
+			height: page_info.img_data.cell_h,
+			x: 0,
+			y: 0
+		};
 
 		// We don't actually want to Crop this image, but we've already
 		// verified (with the ImageSurface stuff) that the image is the correct

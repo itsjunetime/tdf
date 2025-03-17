@@ -3,6 +3,7 @@
 - Update ratatui(-image) dependencies
 - Use new mupdf search API for slightly better performance
 - Pause rendering every once in a while while there's a search term to enable searching across the entire document more quickly
+- Fix an issue with missing search highlights
 
 # v0.3.0
 

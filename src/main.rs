@@ -110,7 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		disable_raw_mode()?;
 
 		let input_line = String::from_utf8(input_vec)?;
-		let input_line = input_line.trim_start_matches("\x1b[4").trim_start_matches(';');
+		let input_line = input_line
+			.trim_start_matches("\x1b[4")
+			.trim_start_matches(';');
 
 		// it should input it to us as `\e[4;<height>;<width>t`, so we need to split to get the h/w
 		// ignore the first val
@@ -119,7 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let (Some(h), Some(w)) = (splits.next(), splits.next()) else {
 			return Err(BadTermSizeStdin(format!(
 				"Terminal responded with unparseable size response '{input_line}'"
-			)).into());
+			))
+			.into());
 		};
 
 		window_size.height = h.parse::<u16>()?;

@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, thread::sleep, time::Duration};
+use std::{thread::sleep, time::Duration};
 
 use crossterm::terminal::WindowSize;
 use flume::{Receiver, SendError, Sender, TryRecvError};
@@ -42,21 +42,14 @@ pub struct PageInfo {
 #[derive(Clone)]
 pub struct ImageData {
 	pub pixels: Vec<u8>,
-	pub cell_area: Rect
+	pub cell_w: u16,
+	pub cell_h: u16
 }
 
 #[derive(Default)]
 struct PrevRender {
 	successful: bool,
-	contained_term: PageSearchResult
-}
-
-#[derive(Default, PartialEq)]
-enum PageSearchResult {
-	#[default]
-	Unknown,
-	DidNotContain,
-	Contained(NonZeroUsize)
+	num_search_found: Option<usize>
 }
 
 #[inline]
@@ -157,18 +150,15 @@ pub fn start_rendering(
 		'render_pages: loop {
 			// next, we gotta wait 'til we get told what the current starting area is so that we can
 			// set it to know what to render to
-			let area = match preserved_area {
-				Some(a) => a,
-				None => {
-					let new_area = loop {
-						if let RenderNotif::Area(r) = receiver.recv().unwrap() {
-							break r;
-						}
-					};
-					preserved_area = Some(new_area);
-					new_area
-				}
-			};
+			let area = preserved_area.unwrap_or_else(|| {
+				let new_area = loop {
+					if let RenderNotif::Area(r) = receiver.recv().unwrap() {
+						break r;
+					}
+				};
+				preserved_area = Some(new_area);
+				new_area
+			});
 
 			// what we do with a notif is the same regardless of if we're in the middle of
 			// rendering the list of pages or we're all done
@@ -198,8 +188,8 @@ pub fn start_rendering(
 								// the pages wherein there were already no search results. So this
 								// is a little optimization to allow that.
 								for page in &mut rendered {
-									if let PageSearchResult::Contained(_) = page.contained_term {
-										page.contained_term = PageSearchResult::DidNotContain;
+									if page.num_search_found.is_some_and(|n| n > 0) {
+										page.num_search_found = Some(0);
 										page.successful = false;
 									}
 								}
@@ -210,7 +200,7 @@ pub fn start_rendering(
 								// term, we can render them with the term, but if they don't, we
 								// don't need to re-render and send it over again.
 								for page in &mut rendered {
-									page.contained_term = PageSearchResult::Unknown;
+									page.num_search_found = None;
 								}
 								search_term = Some(term);
 							}
@@ -256,8 +246,8 @@ pub fn start_rendering(
 				// we only want to continue if one of the following is met:
 				// 1. It failed to render last time (we want to retry)
 				// 2. The `contained_term` is set to Unknown, meaning that we need to at least
-				//    check if it contains the current term to see if it needs a re-render
-				if rendered.successful && rendered.contained_term != PageSearchResult::Unknown {
+				//	  check if it contains the current term to see if it needs a re-render
+				if rendered.successful && rendered.num_search_found.is_some() {
 					continue;
 				}
 
@@ -288,17 +278,22 @@ pub fn start_rendering(
 					invert,
 					(area_w, area_h)
 				) {
-					// If we've already rendered it just fine and we don't need to render it again,
-					// just continue. We're all good
-					Ok(None) => (),
 					// If that fn returned Some, that means it needed to be re-rendered for some
 					// reason or another, so we're sending it here
-					Ok(Some(ctx)) => {
+					Ok(ctx) => {
+						let num_results = ctx.result_rects.len();
+						// If we previously successfully rendered it and it has no results last
+						// time as well, don't send another new image
+						if rendered.num_search_found == Some(0)
+							&& num_results == 0 && rendered.successful
+						{
+							continue;
+						}
+
 						// we make a potentially incorrect assumption here that writing the context
 						// to a png won't fail, and mark that it all rendered correctly here before
 						// spawning off the thread to do so and send it.
-						rendered.contained_term = NonZeroUsize::new(ctx.result_rects.len())
-							.map_or(PageSearchResult::DidNotContain, PageSearchResult::Contained);
+						rendered.num_search_found = Some(num_results);
 						rendered.successful = true;
 
 						let w = ctx.pixmap.width();
@@ -313,12 +308,8 @@ pub fn start_rendering(
 						sender.send(Ok(RenderInfo::Page(PageInfo {
 							img_data: ImageData {
 								pixels,
-								cell_area: Rect {
-									x: 0,
-									y: 0,
-									width: (ctx.surface_w / f32::from(col_w)) as u16,
-									height: (ctx.surface_h / f32::from(col_h)) as u16
-								}
+								cell_w: (ctx.surface_w / f32::from(col_w)) as u16,
+								cell_h: (ctx.surface_h / f32::from(col_h)) as u16
 							},
 							page_num: num,
 							result_rects: ctx.result_rects
@@ -347,7 +338,7 @@ pub fn start_rendering(
 						.take(SEARCH_AT_TIME)
 						// We want to remove all the ones that we've already determined did not
 						// contain the current term...
-						.filter(|(_, r)| r.contained_term != PageSearchResult::DidNotContain)
+						.filter(|(_, r)| r.num_search_found.is_none_or(|n| n > 0))
 						// And then adjust the index to be correct for the actual page number
 						.map(|(idx, r)| (idx + search_start, r));
 
@@ -360,9 +351,13 @@ pub fn start_rendering(
 							.and_then(|page| count_search_results(&page, term))
 							.unwrap();
 
+						// And mark that whatever else was rendered last is not relevant anymore if
+						// there are results that need to be rendered
+						if num_results > 0 {
+							rendered.successful = false;
+						}
 						// Mark the `contained_term` field with this updated value...
-						rendered.contained_term = NonZeroUsize::new(num_results)
-							.map_or(PageSearchResult::DidNotContain, PageSearchResult::Contained);
+						rendered.num_search_found = Some(num_results);
 
 						// And send it over to the tui so that they can know and use it to
 						// determine what next page to jump to
@@ -423,11 +418,11 @@ fn render_single_page_to_ctx(
 	prev_render: &PrevRender,
 	invert: bool,
 	(area_w, area_h): (f32, f32)
-) -> Result<Option<RenderedContext>, mupdf::error::Error> {
-	let result_rects = match prev_render.contained_term {
-		PageSearchResult::Unknown => search_page(page, search_term, None)?,
-		PageSearchResult::DidNotContain => Vec::new(),
-		PageSearchResult::Contained(count) => search_page(page, search_term, Some(count))?
+) -> Result<RenderedContext, mupdf::error::Error> {
+	let result_rects = match prev_render.num_search_found {
+		None => search_page(page, search_term, 0)?,
+		Some(0) => Vec::new(),
+		Some(count @ 1..) => search_page(page, search_term, count)?
 	};
 
 	// then, get the size of the page
@@ -486,12 +481,12 @@ fn render_single_page_to_ctx(
 		})
 		.collect::<Vec<_>>();
 
-	Ok(Some(RenderedContext {
+	Ok(RenderedContext {
 		pixmap,
 		surface_w,
 		surface_h,
 		result_rects
-	}))
+	})
 }
 
 #[derive(Clone)]
@@ -506,14 +501,13 @@ pub struct HighlightRect {
 fn search_page(
 	page: &Page,
 	search_term: Option<&str>,
-	trusted_search_results: Option<NonZeroUsize>
+	trusted_search_results: usize
 ) -> Result<Vec<Quad>, mupdf::error::Error> {
 	search_term
 		.map(|term| {
 			page.to_text_page(TextPageOptions::empty())
 				.and_then(|page| {
-					let mut v =
-						Vec::with_capacity(trusted_search_results.map_or(0, NonZeroUsize::get));
+					let mut v = Vec::with_capacity(trusted_search_results);
 					page.search_cb(term, &mut v, |v, results| {
 						v.extend(results.iter().cloned());
 						SearchHitResponse::ContinueSearch

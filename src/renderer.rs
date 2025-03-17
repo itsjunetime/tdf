@@ -210,6 +210,7 @@ pub fn start_rendering(
 				}};
 			}
 
+			let any_not_searched = rendered.iter().any(|r| r.num_search_found.is_none());
 			let (left, right) = rendered.split_at_mut(start_point);
 
 			// This is our iterator over all the pages we want to look at and render. It uses this
@@ -235,7 +236,12 @@ pub fn start_rendering(
 					// If they haven't limited it, and we DO have a search term we need to look
 					// for, just do 20 so that we don't dramatically slow down the search process
 					// since they've specifically initiated that and so we want it to take priority
-					(PrerenderLimit::All, Some(_)) => 20
+					(PrerenderLimit::All, Some(_)) =>
+						if any_not_searched {
+							20
+						} else {
+							n_pages
+						},
 				});
 
 			let area_w = f32::from(area.width) * f32::from(col_w);
@@ -281,21 +287,6 @@ pub fn start_rendering(
 					// If that fn returned Some, that means it needed to be re-rendered for some
 					// reason or another, so we're sending it here
 					Ok(ctx) => {
-						let num_results = ctx.result_rects.len();
-						// If we previously successfully rendered it and it has no results last
-						// time as well, don't send another new image
-						if rendered.num_search_found == Some(0)
-							&& num_results == 0 && rendered.successful
-						{
-							continue;
-						}
-
-						// we make a potentially incorrect assumption here that writing the context
-						// to a png won't fail, and mark that it all rendered correctly here before
-						// spawning off the thread to do so and send it.
-						rendered.num_search_found = Some(num_results);
-						rendered.successful = true;
-
 						let w = ctx.pixmap.width();
 						let h = ctx.pixmap.height();
 						let cap = (w * h * u32::from(ctx.pixmap.n())) as usize + 16;
@@ -304,6 +295,9 @@ pub fn start_rendering(
 							sender.send(Err(RenderError::Doc(e)))?;
 							continue;
 						};
+
+						rendered.num_search_found = Some(ctx.result_rects.len());
+						rendered.successful = true;
 
 						sender.send(Ok(RenderInfo::Page(PageInfo {
 							img_data: ImageData {
@@ -336,9 +330,8 @@ pub fn start_rendering(
 						// And we only want to take max SEARCH_AT_TIME of them since we don't want
 						// to block on this for *too* long
 						.take(SEARCH_AT_TIME)
-						// We want to remove all the ones that we've already determined did not
-						// contain the current term...
-						.filter(|(_, r)| r.num_search_found.is_none_or(|n| n > 0))
+						// And we only want the ones that we still don't know about...
+						.filter(|(_, r)| r.num_search_found.is_none())
 						// And then adjust the index to be correct for the actual page number
 						.map(|(idx, r)| (idx + search_start, r));
 
@@ -374,6 +367,10 @@ pub fn start_rendering(
 					// now, we want to check if we've gone past the end - if so, we go back to the
 					// beginning so we can get the pages before the current one.
 					if search_start > n_pages {
+						if start_point == 0 {
+							break;
+						}
+
 						search_start = 0;
 					} else if ((search_start - SEARCH_AT_TIME) + 1..search_start)
 						.contains(&start_point)
@@ -390,6 +387,13 @@ pub fn start_rendering(
 						Ok(msg) => handle_notif!(msg)
 					}
 				}
+			}
+
+			// So now we've just *searched* all the pages but not necessarily rendered all of them.
+			// So if there are any we have yet to render, we need to loop back to the beginning of
+			// this loop to continue rendering all of them
+			if rendered.iter().any(|r| !r.successful) {
+				continue;
 			}
 
 			// Then once we've rendered all these pages, wait until we get another notification

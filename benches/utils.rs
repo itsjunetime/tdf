@@ -77,6 +77,14 @@ pub fn start_rendering_loop(
 		width: columns * FONT_SIZE.0
 	};
 
+	let main_area = Rect {
+		x: 0,
+		y: 0,
+		width: columns - 2,
+		height: rows - 6
+	};
+	to_render_tx.send(RenderNotif::Area(main_area)).unwrap();
+
 	std::thread::spawn(move || {
 		start_rendering(
 			&str_path,
@@ -86,14 +94,6 @@ pub fn start_rendering_loop(
 			tdf::PrerenderLimit::All
 		)
 	});
-
-	let main_area = Rect {
-		x: 0,
-		y: 0,
-		width: columns - 2,
-		height: rows - 6
-	};
-	to_render_tx.send(RenderNotif::Area(main_area)).unwrap();
 
 	let from_render_rx = from_render_rx.into_stream();
 	(from_render_rx, to_render_tx)

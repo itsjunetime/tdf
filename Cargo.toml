@@ -27,7 +27,7 @@ ratatui = { git = "https://github.com/itsjunetime/ratatui.git" }
 # ratatui = { path = "./ratatui/ratatui" }
 # We're using this to have the vb64 feature (for faster base64 encoding, since that does take up a good bit of time when converting images to the `Protocol`. It also just includes a few more features that I'm waiting on main to upstream
 ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", branch = "vb64_on_personal", default-features = false }
-# ratatui-image = { path = "./ratatui-image", features = ["vb64"], default-features = false }
+# ratatui-image = { path = "./ratatui-image", default-features = false }
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 image = { version = "0.25.1", features = ["pnm", "rayon", "png"], default-features = false }
 notify = { version = "8.0.0", features = ["crossbeam-channel"] }

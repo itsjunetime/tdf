@@ -158,4 +158,4 @@ used_underscore_items = "warn"
 zero_sized_map_values = "warn"
 
 [patch.crates-io]
-pathfinder_simd = { git = "https://github.com/itsjunetime/pathfinder.git" }
+pathfinder_simd = { git = "https://github.com/servo/pathfinder.git" }

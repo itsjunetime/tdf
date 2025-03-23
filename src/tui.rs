@@ -22,7 +22,10 @@ use ratatui::{
 };
 use ratatui_image::{Image, protocol::Protocol};
 
-use crate::{renderer::RenderError, skip::Skip};
+use crate::{
+	renderer::{RenderError, fill_default},
+	skip::Skip
+};
 
 pub struct Tui {
 	name: String,
@@ -239,9 +242,8 @@ impl Tui {
 			let mut test_area_w = img_area.width;
 			// go through our pages, starting at the first one we want to view
 			let mut page_widths = self.rendered[self.page..]
-				.iter()
-				// and get their indices (I know it's offset, we fix it down below when we actually
-				// render each page)
+				.iter_mut()
+				// and get this to represent a count of how many we're looking at so far to render
 				.enumerate()
 				// and only take as many as are ready to be rendered
 				.take_while(|(idx, page)| {
@@ -252,9 +254,9 @@ impl Tui {
 					take
 				})
 				// and map it to their width (in cells on the terminal, not pixels)
-				.filter_map(|(idx, page)| page.img.as_ref().map(|img| (idx, img.rect().width)))
+				.filter_map(|(_, page)| page.img.as_mut().map(|img| (img.rect().width, img)))
 				// and then take them as long as they won't overflow the available area.
-				.take_while(|(_, width)| match test_area_w.checked_sub(*width) {
+				.take_while(|(width, _)| match test_area_w.checked_sub(*width) {
 					Some(new_val) => {
 						test_area_w = new_val;
 						true
@@ -273,7 +275,7 @@ impl Tui {
 			} else {
 				execute!(stdout(), BeginSynchronizedUpdate).unwrap();
 
-				let total_width = page_widths.iter().map(|(_, w)| w).sum::<u16>();
+				let total_width = page_widths.iter().map(|(w, _)| w).sum::<u16>();
 
 				self.last_render.pages_shown = page_widths.len();
 
@@ -281,17 +283,8 @@ impl Tui {
 				self.last_render.unused_width = unused_width;
 				img_area.x += unused_width / 2;
 
-				for (page_idx, width) in page_widths {
-					// now, theoretically, when we call this, this page should *not* be None, but we do
-					// have to account for that possibility since we can't `borrow` the image from self
-					// when passing it in to `render_single_page` since that would be a mutable
-					// reference + an immutable reference (and also we need to potentially temporarily
-					// remove it from the array of rendered pages to replace it with a text-rendered
-					// image)
-					self.render_single_page(frame, page_idx + self.page, Rect {
-						width,
-						..img_area
-					});
+				for (width, img) in page_widths {
+					Self::render_single_page(frame, img, Rect { width, ..img_area });
 					img_area.x += width;
 				}
 
@@ -302,11 +295,8 @@ impl Tui {
 		}
 	}
 
-	fn render_single_page(&mut self, frame: &mut Frame<'_>, page_idx: usize, img_area: Rect) {
-		match self.rendered[page_idx].img {
-			Some(ref mut page_img) => frame.render_widget(Image::new(page_img), img_area),
-			None => Self::render_loading_in(frame, img_area)
-		};
+	fn render_single_page(frame: &mut Frame<'_>, page_img: &mut Protocol, img_area: Rect) {
+		frame.render_widget(Image::new(page_img), img_area);
 	}
 
 	fn render_loading_in(frame: &mut Frame<'_>, area: Rect) {
@@ -350,9 +340,7 @@ impl Tui {
 	}
 
 	pub fn set_n_pages(&mut self, n_pages: usize) {
-		self.rendered = std::iter::from_fn(|| Some(RenderedInfo::default()))
-			.take(n_pages)
-			.collect();
+		fill_default(&mut self.rendered, n_pages);
 		self.page = self.page.min(n_pages - 1);
 	}
 

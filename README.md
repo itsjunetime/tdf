@@ -13,6 +13,11 @@ Designed to be performant, very responsive, and work well with even very large P
 - Responsive details about rendering/search progress
 - Reactive layout
 
+## Installation
+
+1. Get the rust toolchain from [rustup.rs](https://rustup.rs)
+2. Run `rustup install nightly && cargo +nightly install --git https://github.com/itsjunetime/tdf.git`
+
 ## To Build
 First, you need to install the system dependencies. This will generally only include `libfontconfig`. If you're on linux, these will probably show up in your package manager as something like `libfontconfig1-devel` or `libfontconfig-dev`.
 
@@ -21,6 +26,8 @@ If it turns out that you're missing one of these, it will fail to compile and te
 1. Get the rust toolchain from [rustup.rs](https://rustup.rs)
 2. Clone the repo and `cd` into it
 3. Run `cargo build --release`
+
+The binary should then be found at `./target/release/tdf`.
 
 ## Why in the world would you use this?
 

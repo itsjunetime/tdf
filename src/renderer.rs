@@ -459,7 +459,7 @@ fn render_single_page_to_ctx(
 	let colorspace = Colorspace::device_rgb();
 	let matrix = Matrix::new_scale(scale_factor, scale_factor);
 
-	let mut pixmap = page.to_pixmap(&matrix, &colorspace, 0.0, false)?;
+	let mut pixmap = page.to_pixmap(&matrix, &colorspace, false, false)?;
 	if invert {
 		pixmap.invert()?;
 	}

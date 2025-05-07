@@ -23,11 +23,14 @@ const FILES: [&str; 3] = [
 	"benches/geotopo.pdf"
 ];
 
+const BLACK: i32 = 0;
+const WHITE: i32 = 1000;
+
 fn render_full(c: &mut Criterion) {
 	for file in FILES {
 		c.bench_with_input(BenchmarkId::new("render_full", file), &file, |b, &file| {
 			b.to_async(tokio::runtime::Runtime::new().unwrap())
-				.iter(|| render_doc(file, None))
+				.iter(|| render_doc(file, None, BLACK, WHITE))
 		});
 	}
 }
@@ -39,7 +42,7 @@ fn render_to_first_page(c: &mut Criterion) {
 			&file,
 			|b, &file| {
 				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter(|| render_first_page(file))
+					.iter(|| render_first_page(file, BLACK, WHITE))
 			}
 		);
 	}
@@ -48,7 +51,7 @@ fn render_to_first_page(c: &mut Criterion) {
 fn only_converting(c: &mut Criterion) {
 	for file in FILES {
 		let runtime = tokio::runtime::Runtime::new().unwrap();
-		let all_rendered = runtime.block_on(render_all_files(file));
+		let all_rendered = runtime.block_on(render_all_files(file, BLACK, WHITE));
 
 		c.bench_with_input(
 			BenchmarkId::new("only_converting", file),
@@ -68,7 +71,7 @@ fn search_short_common(c: &mut Criterion) {
 			&file,
 			|b, &file| {
 				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter(|| render_doc(file, Some("an")))
+					.iter(|| render_doc(file, Some("an"), BLACK, WHITE))
 			}
 		);
 	}
@@ -81,20 +84,20 @@ fn search_long_rare(c: &mut Criterion) {
 			&file,
 			|b, &file| {
 				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter(|| render_doc(file, Some("this is long and rare")))
+					.iter(|| render_doc(file, Some("this is long and rare"), BLACK, WHITE))
 			}
 		);
 	}
 }
 
-pub async fn render_first_page(path: impl AsRef<Path>) {
+pub async fn render_first_page(path: impl AsRef<Path>, black: i32, white: i32) {
 	let RenderState {
 		mut from_render_rx,
 		mut from_converter_rx,
 		mut pages,
 		mut to_converter_tx,
 		to_render_tx
-	} = start_all_rendering(path);
+	} = start_all_rendering(path, black, white);
 
 	// we only want to render until the first page is ready to be printed
 	while pages.iter().all(Option::is_none) {
@@ -114,8 +117,8 @@ pub async fn render_first_page(path: impl AsRef<Path>) {
 	drop(to_render_tx);
 }
 
-async fn render_all_files(path: &'static str) -> Vec<PageInfo> {
-	let (mut from_render_rx, to_render_tx) = start_rendering_loop(path);
+async fn render_all_files(path: &'static str, black: i32, white: i32) -> Vec<PageInfo> {
+	let (mut from_render_rx, to_render_tx) = start_rendering_loop(path, black, white);
 	let mut pages = Vec::<Option<PageInfo>>::new();
 
 	while let Some(info) = from_render_rx.next().await {

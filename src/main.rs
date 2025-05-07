@@ -12,6 +12,7 @@ use crossterm::{
 		enable_raw_mode, window_size
 	}
 };
+use csscolorparser;
 use futures_util::{FutureExt, stream::StreamExt};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -51,11 +52,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		/// The number of pages to prerender surrounding the currently-shown page; 0 means no
 		/// limit. By default, there is no limit.
 		optional -p,--prerender prerender: usize
+		/// Custom white and black colors
+		optional -w,--white-color white: String
+		optional -b,--black-color black: String
 		/// PDF file to read
 		required file: PathBuf
 	};
 
 	let path = flags.file.canonicalize()?;
+	let black = parse_color_to_i32(&flags.black_color.unwrap_or("000000".into()))?;
+
+	let white = parse_color_to_i32(&flags.white_color.unwrap_or("FFFFFF".into()))?;
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
 	let tui_tx = watch_to_render_tx.clone();
@@ -141,7 +148,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.and_then(NonZeroUsize::new)
 		.map_or(PrerenderLimit::All, PrerenderLimit::Limited);
 	std::thread::spawn(move || {
-		renderer::start_rendering(&file_path, render_tx, render_rx, window_size, prerender)
+		renderer::start_rendering(
+			&file_path,
+			render_tx,
+			render_rx,
+			window_size,
+			prerender,
+			black,
+			white
+		)
 	});
 
 	let mut ev_stream = crossterm::event::EventStream::new();
@@ -285,4 +300,11 @@ fn on_notify_ev(
 			}
 		}
 	}
+}
+fn parse_color_to_i32(cs: &str) -> Result<i32, csscolorparser::ParseColorError> {
+	let color = csscolorparser::parse(cs)?;
+	let [r, g, b, _] = color.to_rgba8();
+	let u: u32 = r as u32 * 256 * 256 + g as u32 * 256 + b as u32;
+	let bytes = u.to_le_bytes();
+	return Ok(i32::from_le_bytes(bytes));
 }

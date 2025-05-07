@@ -43,6 +43,7 @@ rayon = { version = "*", default-features = false }
 
 # for tracing with tokio-console
 console-subscriber = { version = "0.4.0", optional = true }
+csscolorparser = { version = "0.7.0", features = ["rgb", "rust-rgb"] }
 
 [profile.production]
 inherits = "release"

@@ -12,7 +12,6 @@ use crossterm::{
 		enable_raw_mode, window_size
 	}
 };
-use csscolorparser;
 use futures_util::{FutureExt, stream::StreamExt};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};

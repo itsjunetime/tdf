@@ -304,7 +304,7 @@ fn on_notify_ev(
 fn parse_color_to_i32(cs: &str) -> Result<i32, csscolorparser::ParseColorError> {
 	let color = csscolorparser::parse(cs)?;
 	let [r, g, b, _] = color.to_rgba8();
-	let u: u32 = r as u32 * 256 * 256 + g as u32 * 256 + b as u32;
+	let u: u32 = u32::from(r) * 256 * 256 + u32::from(g) * 256 + u32::from(b);
 	let bytes = u.to_le_bytes();
-	return Ok(i32::from_le_bytes(bytes));
+	Ok(i32::from_le_bytes(bytes))
 }

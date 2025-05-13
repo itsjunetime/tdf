@@ -57,7 +57,9 @@ pub struct RenderState {
 const FONT_SIZE: (u16, u16) = (8, 14);
 
 pub fn start_rendering_loop(
-	path: impl AsRef<Path>
+	path: impl AsRef<Path>,
+	black: i32,
+	white: i32
 ) -> (
 	RecvStream<'static, Result<RenderInfo, RenderError>>,
 	Sender<RenderNotif>
@@ -91,7 +93,9 @@ pub fn start_rendering_loop(
 			to_main_tx,
 			from_main_rx,
 			size,
-			tdf::PrerenderLimit::All
+			tdf::PrerenderLimit::All,
+			black,
+			white
 		)
 	});
 
@@ -122,8 +126,8 @@ pub fn start_converting_loop(
 	(from_converter_rx, to_converter_tx)
 }
 
-pub fn start_all_rendering(path: impl AsRef<Path>) -> RenderState {
-	let (from_render_rx, to_render_tx) = start_rendering_loop(path);
+pub fn start_all_rendering(path: impl AsRef<Path>, black: i32, white: i32) -> RenderState {
+	let (from_render_rx, to_render_tx) = start_rendering_loop(path, black, white);
 	let (from_converter_rx, to_converter_tx) = start_converting_loop(20);
 
 	let pages: Vec<Option<ConvertedPage>> = Vec::new();
@@ -137,14 +141,14 @@ pub fn start_all_rendering(path: impl AsRef<Path>) -> RenderState {
 	}
 }
 
-pub async fn render_doc(path: impl AsRef<Path>, search_term: Option<&str>) {
+pub async fn render_doc(path: impl AsRef<Path>, search_term: Option<&str>, black: i32, white: i32) {
 	let RenderState {
 		mut from_render_rx,
 		mut from_converter_rx,
 		mut pages,
 		mut to_converter_tx,
 		to_render_tx
-	} = start_all_rendering(path);
+	} = start_all_rendering(path, black, white);
 
 	if let Some(term) = search_term {
 		to_render_tx

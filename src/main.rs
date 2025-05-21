@@ -51,9 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		/// The number of pages to prerender surrounding the currently-shown page; 0 means no
 		/// limit. By default, there is no limit.
 		optional -p,--prerender prerender: usize
-		/// Custom white color
+		/// Custom white color, specified in css format (e.g. "FFFFFF" or "rgb(255, 255, 255)")
 		optional -w,--white-color white: String
-		/// Custom black color
+		/// Custom black color, specified in css format (e.g "000000" or "rgb(0, 0, 0)")
 		optional -b,--black-color black: String
 		/// PDF file to read
 		required file: PathBuf

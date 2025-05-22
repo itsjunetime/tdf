@@ -9,5 +9,5 @@ async fn main() {
 		.nth(1)
 		.expect("Please enter a file to profile");
 
-	utils::render_doc(file, None).await;
+	utils::render_doc(file, None, 0, 1000).await;
 }

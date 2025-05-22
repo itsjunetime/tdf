@@ -28,6 +28,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libfontconfig1-dev libgoogle-perftools-dev google-perftools
     - uses: actions/checkout@v4
+    - name: Install clippy and fmt
+      run: rustup component add clippy rustfmt
     - name: Clippy
       run: cargo clippy -- -D warnings
     - name: Check fmt

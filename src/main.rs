@@ -60,11 +60,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	let path = flags.file.canonicalize()?;
-	let black = parse_color_to_i32(&flags.black_color.unwrap_or("000000".into()))
-		.map_err(|e| BadTermSizeStdin(format!("Couldn't parse black color: {e} - is it formatted like a CSS color?")))?;
+	let black = parse_color_to_i32(&flags.black_color.unwrap_or("000000".into())).map_err(|e| {
+		BadTermSizeStdin(format!(
+			"Couldn't parse black color: {e} - is it formatted like a CSS color?"
+		))
+	})?;
 
-	let white = parse_color_to_i32(&flags.white_color.unwrap_or("FFFFFF".into()))
-		.map_err(|e| BadTermSizeStdin(format!("Couldn't parse while color: {e} - is it formatted like a CSS color?")))?;;
+	let white = parse_color_to_i32(&flags.white_color.unwrap_or("FFFFFF".into())).map_err(|e| {
+		BadTermSizeStdin(format!(
+			"Couldn't parse while color: {e} - is it formatted like a CSS color?"
+		))
+	})?;
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
 	let tui_tx = watch_to_render_tx.clone();

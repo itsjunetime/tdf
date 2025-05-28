@@ -76,7 +76,9 @@ pub fn start_rendering(
 	sender: Sender<Result<RenderInfo, RenderError>>,
 	receiver: Receiver<RenderNotif>,
 	size: WindowSize,
-	prerender: PrerenderLimit
+	prerender: PrerenderLimit,
+	black: i32,
+	white: i32
 ) -> Result<(), SendError<Result<RenderInfo, RenderError>>> {
 	// We want this outside of 'reload so that if the doc reloads, the search term that somebody
 	// set will still get highlighted in the reloaded doc
@@ -282,6 +284,8 @@ pub fn start_rendering(
 					search_term.as_deref(),
 					rendered,
 					invert,
+					black,
+					white,
 					(area_w, area_h)
 				) {
 					// If that fn returned Some, that means it needed to be re-rendered for some
@@ -421,6 +425,8 @@ fn render_single_page_to_ctx(
 	search_term: Option<&str>,
 	prev_render: &PrevRender,
 	invert: bool,
+	black: i32,
+	white: i32,
 	(area_w, area_h): (f32, f32)
 ) -> Result<RenderedContext, mupdf::error::Error> {
 	let result_rects = match prev_render.num_search_found {
@@ -461,7 +467,9 @@ fn render_single_page_to_ctx(
 
 	let mut pixmap = page.to_pixmap(&matrix, &colorspace, false, false)?;
 	if invert {
-		pixmap.invert()?;
+		pixmap.tint(white, black)?;
+	} else {
+		pixmap.tint(black, white)?;
 	}
 
 	let (x_res, y_res) = pixmap.resolution();

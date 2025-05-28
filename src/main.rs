@@ -51,11 +51,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		/// The number of pages to prerender surrounding the currently-shown page; 0 means no
 		/// limit. By default, there is no limit.
 		optional -p,--prerender prerender: usize
+		/// Custom white color, specified in css format (e.g. "FFFFFF" or "rgb(255, 255, 255)")
+		optional -w,--white-color white: String
+		/// Custom black color, specified in css format (e.g "000000" or "rgb(0, 0, 0)")
+		optional -b,--black-color black: String
 		/// PDF file to read
 		required file: PathBuf
 	};
 
 	let path = flags.file.canonicalize()?;
+	let black = parse_color_to_i32(&flags.black_color.unwrap_or("000000".into())).map_err(|e| {
+		BadTermSizeStdin(format!(
+			"Couldn't parse black color: {e} - is it formatted like a CSS color?"
+		))
+	})?;
+
+	let white = parse_color_to_i32(&flags.white_color.unwrap_or("FFFFFF".into())).map_err(|e| {
+		BadTermSizeStdin(format!(
+			"Couldn't parse while color: {e} - is it formatted like a CSS color?"
+		))
+	})?;
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
 	let tui_tx = watch_to_render_tx.clone();
@@ -141,7 +156,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.and_then(NonZeroUsize::new)
 		.map_or(PrerenderLimit::All, PrerenderLimit::Limited);
 	std::thread::spawn(move || {
-		renderer::start_rendering(&file_path, render_tx, render_rx, window_size, prerender)
+		renderer::start_rendering(
+			&file_path,
+			render_tx,
+			render_rx,
+			window_size,
+			prerender,
+			black,
+			white
+		)
 	});
 
 	let mut ev_stream = crossterm::event::EventStream::new();
@@ -285,4 +308,9 @@ fn on_notify_ev(
 			}
 		}
 	}
+}
+fn parse_color_to_i32(cs: &str) -> Result<i32, csscolorparser::ParseColorError> {
+	let color = csscolorparser::parse(cs)?;
+	let [r, g, b, _] = color.to_rgba8();
+	Ok(i32::from_be_bytes([0, r, g, b]))
 }

@@ -2,8 +2,8 @@ use core::error::Error;
 use std::{
 	borrow::Cow,
 	ffi::OsString,
-	io::{BufReader, Read, Stdout, Write, stdout},
-	num::NonZeroUsize,
+	io::{BufReader, Read, StdoutLock, Write, stdout},
+	num::{NonZeroU32, NonZeroUsize},
 	path::PathBuf
 };
 
@@ -17,12 +17,20 @@ use crossterm::{
 };
 use flume::{Sender, r#async::RecvStream};
 use futures_util::{FutureExt, stream::StreamExt};
+use kittage::{
+	ImageDimensions, PixelFormat,
+	action::Action,
+	display::{DisplayConfig, DisplayLocation},
+	error::TransmitError,
+	image::Image as KImage,
+	medium::Medium
+};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use ratatui_image::picker::Picker;
 use tdf::{
 	PrerenderLimit,
-	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
+	converter::{ConvertedPage, ConverterMsg, MaybeTransferred, run_conversion_loop},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
@@ -373,10 +381,90 @@ async fn enter_redraw_loop(
 		}
 
 		if needs_redraw {
+			let mut to_display = vec![];
 			term.draw(|f| {
-				tui.render(f, &main_area);
+				to_display = tui.render(f, &main_area);
 			})?;
-			execute!(stdout(), EndSynchronizedUpdate)?;
+
+			let mut stdout = stdout().lock();
+			let mut maybe_err = Ok(());
+			for (img, area) in to_display {
+				let config = DisplayConfig {
+					location: DisplayLocation {
+						x: area.x.into(),
+						y: area.y.into(),
+						..DisplayLocation::default()
+					},
+					..DisplayConfig::default()
+				};
+
+				maybe_err = match img {
+					MaybeTransferred::NotYet(image, _map) => {
+						let mut fake_image = KImage {
+							num_or_id: image.num_or_id,
+							format: PixelFormat::Rgb24(
+								ImageDimensions {
+									width: 0,
+									height: 0
+								},
+								None
+							),
+							medium: Medium::Direct {
+								chunk_size: None,
+								data: (&[]).into()
+							}
+						};
+						std::mem::swap(image, &mut fake_image);
+
+						let res = Action::TransmitAndDisplay {
+							image: fake_image,
+							config,
+							placement_id: None
+						}
+						.execute_async(&mut stdout, &mut ev_stream)
+						.await;
+
+						match res {
+							Ok((_, img_id)) => {
+								// We need the `_map` to be dropped here, but can't explicitly carry it
+								// over to here. So we're just relying on the overwrite of `img` to
+								// drop `_map` (and thus unmap the memory) for us
+								*img = MaybeTransferred::Transferred(img_id);
+								Ok(())
+							}
+							Err(e) => Err(match e {
+								TransmitError::Writing(
+									Action::TransmitAndDisplay {
+										image: failed_img, ..
+									},
+									e
+								) => {
+									*image = failed_img;
+									e.to_string()
+								}
+								_ => e.to_string()
+							})
+						}
+					}
+					MaybeTransferred::Transferred(image_id) => Action::Display {
+						image_id: *image_id,
+						placement_id: NonZeroU32::new(1).unwrap(),
+						config
+					}
+					.execute_async(&mut stdout, &mut ev_stream)
+					.await
+					.map(|(_, _)| ())
+					.map_err(|e| e.to_string())
+				};
+			}
+
+			if let Err(e) = maybe_err {
+				tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
+					"Couldn't transfer image to the terminal: {e}"
+				))));
+			}
+
+			execute!(&mut stdout, EndSynchronizedUpdate)?;
 		}
 	}
 }

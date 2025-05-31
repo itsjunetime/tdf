@@ -1519,6 +1519,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kittage"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "crossterm",
+ "futures-core",
+ "image",
+ "memchr",
+ "memmap2",
+ "psx-shm",
+ "rustix 1.0.8",
+ "thiserror 2.0.12",
+ "tokio",
+]
+
+[[package]]
 name = "kqueue"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1697,6 +1713,15 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
+
+[[package]]
+name = "memmap2"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "483758ad303d734cec05e5c12b41d7e93e6a6390c5e9dae6bdeb7c1259012d28"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "memmem"
@@ -2289,6 +2314,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
 dependencies = [
  "prost",
+]
+
+[[package]]
+name = "psx-shm"
+version = "0.1.1"
+source = "git+https://github.com/itsjunetime/psx-shm.git#3fcbae91217cd50ea0e4c838276ef7500cccf024"
+dependencies = [
+ "memmap2",
+ "rustix 1.0.8",
 ]
 
 [[package]]
@@ -2907,6 +2941,8 @@ dependencies = [
  "futures-util",
  "image",
  "itertools 0.14.0",
+ "kittage",
+ "memmap2",
  "mimalloc",
  "mupdf",
  "nix 0.30.1",

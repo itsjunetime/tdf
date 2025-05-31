@@ -20,9 +20,10 @@ use ratatui::{
 	text::{Span, Text},
 	widgets::{Block, Borders, Clear, Padding}
 };
-use ratatui_image::{Image, protocol::Protocol};
+use ratatui_image::Image;
 
 use crate::{
+	converter::{ConvertedImage, MaybeTransferred},
 	renderer::{RenderError, fill_default},
 	skip::Skip
 };
@@ -74,7 +75,7 @@ struct PageConstraints {
 #[derive(Default)]
 struct RenderedInfo {
 	// The image, if it has been rendered by `Converter` to that struct
-	img: Option<Protocol>,
+	img: Option<ConvertedImage>,
 	// The number of results for the current search term that have been found on this page. None if
 	// we haven't checked this page yet
 	// Also this isn't the most efficient representation of this value, but it's accurate, so like
@@ -127,10 +128,15 @@ impl Tui {
 	}
 
 	// TODO: Make a way to fill the width of the screen with one page and scroll down to view it
-	pub fn render(&mut self, frame: &mut Frame<'_>, full_layout: &RenderLayout) {
+	#[must_use]
+	pub fn render<'s>(
+		&'s mut self,
+		frame: &mut Frame<'_>,
+		full_layout: &RenderLayout
+	) -> Vec<(&'s mut MaybeTransferred, Rect)> {
 		if self.showing_help_msg {
 			self.render_help_msg(frame);
-			return;
+			return vec![];
 		}
 
 		if let Some((top_area, bottom_area)) = full_layout.top_and_bottom {
@@ -237,6 +243,7 @@ impl Tui {
 			// be written and set to skip it so that ratatui doesn't spend a lot of time diffing it
 			// each re-render
 			frame.render_widget(Skip::new(true), img_area);
+			vec![]
 		} else {
 			// here we calculate how many pages can fit in the available area.
 			let mut test_area_w = img_area.width;
@@ -254,7 +261,7 @@ impl Tui {
 					take
 				})
 				// and map it to their width (in cells on the terminal, not pixels)
-				.filter_map(|(_, page)| page.img.as_mut().map(|img| (img.rect().width, img)))
+				.filter_map(|(_, page)| page.img.as_mut().map(|img| (img.area().width, img)))
 				// and then take them as long as they won't overflow the available area.
 				.take_while(|(width, _)| match test_area_w.checked_sub(*width) {
 					Some(new_val) => {
@@ -272,6 +279,7 @@ impl Tui {
 			if page_widths.is_empty() {
 				// If none are ready to render, just show the loading thing
 				Self::render_loading_in(frame, img_area);
+				vec![]
 			} else {
 				execute!(stdout(), BeginSynchronizedUpdate).unwrap();
 
@@ -283,20 +291,42 @@ impl Tui {
 				self.last_render.unused_width = unused_width;
 				img_area.x += unused_width / 2;
 
-				for (width, img) in page_widths {
-					Self::render_single_page(frame, img, Rect { width, ..img_area });
-					img_area.x += width;
-				}
+				let to_display = page_widths
+					.into_iter()
+					.filter_map(|(width, img)| {
+						let maybe_img =
+							Self::render_single_page(frame, img, Rect { width, ..img_area });
+						img_area.x += width;
+						maybe_img
+					})
+					.collect::<Vec<_>>();
 
 				// we want to set this at the very end so it doesn't get set somewhere halfway through and
 				// then the whole diffing thing messes it up
 				self.last_render.rect = size;
+
+				to_display
 			}
 		}
 	}
 
-	fn render_single_page(frame: &mut Frame<'_>, page_img: &mut Protocol, img_area: Rect) {
-		frame.render_widget(Image::new(page_img), img_area);
+	fn render_single_page<'img>(
+		frame: &mut Frame<'_>,
+		page_img: &'img mut ConvertedImage,
+		img_area: Rect
+	) -> Option<(&'img mut MaybeTransferred, Rect)> {
+		match page_img {
+			ConvertedImage::Generic(page_img) => {
+				frame.render_widget(Image::new(page_img), img_area);
+				None
+			}
+			ConvertedImage::Kitty { img, area } => Some((img, Rect {
+				x: img_area.x,
+				y: img_area.y,
+				width: area.width,
+				height: area.height
+			}))
+		}
 	}
 
 	fn render_loading_in(frame: &mut Frame<'_>, area: Rect) {
@@ -344,7 +374,7 @@ impl Tui {
 		self.page = self.page.min(n_pages - 1);
 	}
 
-	pub fn page_ready(&mut self, img: Protocol, page_num: usize, num_results: usize) {
+	pub fn page_ready(&mut self, img: ConvertedImage, page_num: usize, num_results: usize) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
 		// the last rect marker so that all images are forced to redraw on next render and this one
@@ -352,7 +382,7 @@ impl Tui {
 		if page_num >= self.page && page_num <= self.page + self.last_render.pages_shown {
 			self.last_render.rect = Rect::default();
 		} else {
-			let img_w = img.rect().width;
+			let img_w = img.area().width;
 			if img_w <= self.last_render.unused_width {
 				let num_fit = self.last_render.unused_width / img_w;
 				if page_num >= self.page && (self.page + num_fit as usize) >= page_num {

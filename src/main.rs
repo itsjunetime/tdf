@@ -2,7 +2,7 @@ use core::error::Error;
 use std::{
 	borrow::Cow,
 	ffi::OsString,
-	io::{BufReader, Read, StdoutLock, Write, stdout},
+	io::{BufReader, Read, Write, stdout},
 	num::{NonZeroU32, NonZeroUsize},
 	path::PathBuf
 };
@@ -16,10 +16,12 @@ use crossterm::{
 	}
 };
 use flume::{Sender, r#async::RecvStream};
+use flexi_logger::FileSpec;
 use futures_util::{FutureExt, stream::StreamExt};
 use kittage::{
 	ImageDimensions, PixelFormat,
 	action::Action,
+	delete::{ClearOrDelete, DeleteConfig, WhichToDelete},
 	display::{DisplayConfig, DisplayLocation},
 	error::TransmitError,
 	image::Image as KImage,
@@ -27,10 +29,11 @@ use kittage::{
 };
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use ratatui_image::picker::Picker;
+use ratatui_image::picker::{Picker, ProtocolType};
 use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, MaybeTransferred, run_conversion_loop},
+	kitty::run_action,
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
@@ -96,6 +99,23 @@ async fn main() -> Result<(), WrappedErr> {
 					.into()
 			)
 		})?;
+
+	// need to keep it around throughout the lifetime of the program, but don't rly need to use it.
+	// Just need to make sure it doesn't get dropped yet.
+	let mut maybe_logger = None;
+
+	if std::env::var("RUST_LOG").is_ok() {
+		maybe_logger =
+			Some(
+				flexi_logger::Logger::try_with_env()
+					.map_err(|e| WrappedErr(format!("Couldn't create initial logger: {e}")))?
+					.log_to_file(FileSpec::try_from("./debug.log").map_err(|e| {
+						WrappedErr(format!("Couldn't create FileSpec for logger: {e}"))
+					})?)
+					.start()
+					.map_err(|e| WrappedErr(format!("Can't start logger: {e}")))?
+			);
+	}
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
 	let tui_tx = watch_to_render_tx.clone();
@@ -233,6 +253,7 @@ async fn main() -> Result<(), WrappedErr> {
 	let (to_converter, from_main) = flume::unbounded();
 	let (to_main, from_converter) = flume::unbounded();
 
+	let is_kitty = picker.protocol_type() == ProtocolType::Kitty;
 	tokio::spawn(run_conversion_loop(to_main, from_main, picker, 20));
 
 	let file_name = path.file_name().map_or_else(
@@ -265,6 +286,17 @@ async fn main() -> Result<(), WrappedErr> {
 			format!("Can't enable raw mode, which is necessary to receive input: {e}").into()
 		)
 	})?;
+
+	if is_kitty {
+		run_action(
+			Action::Delete(DeleteConfig {
+				effect: ClearOrDelete::Delete,
+				which: WhichToDelete::IdRange(NonZeroU32::new(1).unwrap()..=NonZeroU32::MAX)
+			}),
+			&mut ev_stream
+		)
+		.await?;
+	}
 
 	let fullscreen = flags.fullscreen.unwrap_or_default();
 	let main_area = Tui::main_layout(&term.get_frame(), fullscreen);
@@ -326,9 +358,10 @@ async fn enter_redraw_loop(
 ) -> Result<(), Box<dyn Error>> {
 	loop {
 		let mut needs_redraw = true;
+		let next_ev = ev_stream.next().fuse();
 		tokio::select! {
 			// First we check if we have any keystrokes
-			Some(ev) = ev_stream.next().fuse() => {
+			Some(ev) = next_ev => {
 				// If we can't get user input, just crash.
 				let ev = ev.expect("Couldn't get any user input");
 
@@ -386,9 +419,9 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area);
 			})?;
 
-			let mut stdout = stdout().lock();
 			let mut maybe_err = Ok(());
-			for (img, area) in to_display {
+			let mut to_replace = Vec::new();
+			for (page_num, img, area) in to_display {
 				let config = DisplayConfig {
 					location: DisplayLocation {
 						x: area.x.into(),
@@ -397,6 +430,8 @@ async fn enter_redraw_loop(
 					},
 					..DisplayConfig::default()
 				};
+
+				log::debug!("looking at img {img:#?}");
 
 				maybe_err = match img {
 					MaybeTransferred::NotYet(image, _map) => {
@@ -416,16 +451,22 @@ async fn enter_redraw_loop(
 						};
 						std::mem::swap(image, &mut fake_image);
 
-						let res = Action::TransmitAndDisplay {
-							image: fake_image,
-							config,
-							placement_id: None
-						}
-						.execute_async(&mut stdout, &mut ev_stream)
+						log::debug!("Actually trying to display an image now: {fake_image:?}...");
+
+						let res = run_action(
+							Action::TransmitAndDisplay {
+								image: fake_image,
+								config,
+								placement_id: None
+							},
+							&mut ev_stream
+						)
 						.await;
 
+						log::debug!("And it should've gone through: {res:?}!...");
+
 						match res {
-							Ok((_, img_id)) => {
+							Ok(img_id) => {
 								// We need the `_map` to be dropped here, but can't explicitly carry it
 								// over to here. So we're just relying on the overwrite of `img` to
 								// drop `_map` (and thus unmap the memory) for us
@@ -433,29 +474,46 @@ async fn enter_redraw_loop(
 								Ok(())
 							}
 							Err(e) => Err(match e {
-								TransmitError::Writing(
-									Action::TransmitAndDisplay {
+								TransmitError::Writing(action, e) => {
+									if let Action::TransmitAndDisplay {
 										image: failed_img, ..
-									},
-									e
-								) => {
-									*image = failed_img;
+									} = *action
+									{
+										*image = failed_img;
+									} else {
+										to_replace.push(page_num);
+									}
+
 									e.to_string()
 								}
-								_ => e.to_string()
+								_ => {
+									to_replace.push(page_num);
+									e.to_string()
+								}
 							})
 						}
 					}
-					MaybeTransferred::Transferred(image_id) => Action::Display {
-						image_id: *image_id,
-						placement_id: NonZeroU32::new(1).unwrap(),
-						config
+					MaybeTransferred::Transferred(image_id) => {
+						let e = run_action(
+							Action::Display {
+								image_id: *image_id,
+								placement_id: NonZeroU32::new(1).unwrap(),
+								config
+							},
+							&mut ev_stream
+						)
+						.await
+						.map(|_| ())
+						.map_err(|e| e.to_string());
+
+						log::debug!("Just tried to display: {e:?}");
+						e
 					}
-					.execute_async(&mut stdout, &mut ev_stream)
-					.await
-					.map(|(_, _)| ())
-					.map_err(|e| e.to_string())
 				};
+			}
+
+			for page_num in to_replace {
+				tui.page_failed_display(page_num);
 			}
 
 			if let Err(e) = maybe_err {
@@ -464,9 +522,20 @@ async fn enter_redraw_loop(
 				))));
 			}
 
-			execute!(&mut stdout, EndSynchronizedUpdate)?;
+			execute!(stdout().lock(), EndSynchronizedUpdate)?;
 		}
 	}
+
+	execute!(
+		term.backend_mut(),
+		LeaveAlternateScreen,
+		crossterm::cursor::Show
+	)?;
+	disable_raw_mode()?;
+
+	drop(maybe_logger);
+
+	Ok(())
 }
 
 fn on_notify_ev(

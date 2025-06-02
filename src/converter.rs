@@ -76,11 +76,11 @@ pub async fn run_conversion_loop(
 
 		// then we go through all the indices available to us and find the first one that has an
 		// image available to steal
-		let Some((page_info, new_iter)) = (idx_start..page)
+		let Some((page_info, new_iter, page_num)) = (idx_start..page)
 			.interleave(page..idx_end)
 			.enumerate()
 			// .skip(*iteration)
-			.find_map(|(i_idx, p_idx)| images[p_idx].take().map(|p| (p, i_idx)))
+			.find_map(|(i_idx, p_idx)| images[p_idx].take().map(|p| (p, i_idx, p_idx)))
 		else {
 			return Ok(None);
 		};
@@ -124,10 +124,11 @@ pub async fn run_conversion_loop(
 
 				match kittage::image::Image::shm_from(
 					dyn_img,
-					format!("__tdf_kittage_{pid}_page_{page}").into()
+					format!("__tdf_kittage_{pid}_page_{page_num}").into()
 				) {
 					Ok((mut img, map)) => {
-						img.num_or_id = NumberOrId::Id(NonZeroU32::new(page as u32 + 1).unwrap());
+						img.num_or_id =
+							NumberOrId::Id(NonZeroU32::new(page_num as u32 + 1).unwrap());
 						ConvertedImage::Kitty {
 							img: MaybeTransferred::NotYet(img, map),
 							area

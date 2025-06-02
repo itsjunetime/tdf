@@ -133,7 +133,7 @@ impl Tui {
 		&'s mut self,
 		frame: &mut Frame<'_>,
 		full_layout: &RenderLayout
-	) -> Vec<(&'s mut MaybeTransferred, Rect)> {
+	) -> Vec<(usize, &'s mut MaybeTransferred, Rect)> {
 		if self.showing_help_msg {
 			self.render_help_msg(frame);
 			return vec![];
@@ -293,11 +293,12 @@ impl Tui {
 
 				let to_display = page_widths
 					.into_iter()
-					.filter_map(|(width, img)| {
+					.enumerate()
+					.filter_map(|(idx, (width, img))| {
 						let maybe_img =
 							Self::render_single_page(frame, img, Rect { width, ..img_area });
 						img_area.x += width;
-						maybe_img
+						maybe_img.map(|(img, r)| (idx + self.page, img, r))
 					})
 					.collect::<Vec<_>>();
 
@@ -398,6 +399,10 @@ impl Tui {
 			img: Some(img),
 			num_results: Some(num_results)
 		};
+	}
+
+	pub fn page_failed_display(&mut self, page_num: usize) {
+		self.rendered[page_num].img = None;
 	}
 
 	pub fn got_num_results_on_page(&mut self, page_num: usize, num_results: usize) {

@@ -9,6 +9,7 @@ pub enum PrerenderLimit {
 }
 
 pub mod converter;
+pub mod kitty;
 pub mod renderer;
 pub mod skip;
 pub mod tui;

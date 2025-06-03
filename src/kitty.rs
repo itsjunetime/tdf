@@ -1,4 +1,4 @@
-use std::{io::Write, num::NonZeroU32};
+use std::io::Write;
 
 use crossterm::{cursor::MoveTo, event::EventStream, execute};
 use kittage::{
@@ -62,6 +62,10 @@ pub async fn display_kitty_images(
 	images: Vec<(usize, &mut MaybeTransferred, Rect)>,
 	ev_stream: &mut EventStream
 ) -> Result<(), (Vec<usize>, String)> {
+	if images.is_empty() {
+		return Ok(());
+	}
+
 	run_action(
 		Action::Delete(DeleteConfig {
 			effect: ClearOrDelete::Clear,
@@ -142,7 +146,7 @@ pub async fn display_kitty_images(
 				let e = run_action(
 					Action::Display {
 						image_id: *image_id,
-						placement_id: NonZeroU32::new(1).unwrap(),
+						placement_id: *image_id,
 						config
 					},
 					ev_stream

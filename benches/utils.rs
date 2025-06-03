@@ -87,12 +87,15 @@ pub fn start_rendering_loop(
 	};
 	to_render_tx.send(RenderNotif::Area(main_area)).unwrap();
 
+	let cell_height_px = size.height / size.rows;
+	let cell_width_px = size.width / size.columns;
 	std::thread::spawn(move || {
 		start_rendering(
 			&str_path,
 			to_main_tx,
 			from_main_rx,
-			size,
+			cell_height_px,
+			cell_width_px,
 			tdf::PrerenderLimit::All,
 			black,
 			white

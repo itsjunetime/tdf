@@ -19,21 +19,16 @@ use flume::{Sender, r#async::RecvStream};
 use flexi_logger::FileSpec;
 use futures_util::{FutureExt, stream::StreamExt};
 use kittage::{
-	ImageDimensions, PixelFormat,
 	action::Action,
-	delete::{ClearOrDelete, DeleteConfig, WhichToDelete},
-	display::{DisplayConfig, DisplayLocation},
-	error::TransmitError,
-	image::Image as KImage,
-	medium::Medium
+	delete::{ClearOrDelete, DeleteConfig, WhichToDelete}
 };
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use ratatui_image::picker::{Picker, ProtocolType};
 use tdf::{
 	PrerenderLimit,
-	converter::{ConvertedPage, ConverterMsg, MaybeTransferred, run_conversion_loop},
-	kitty::run_action,
+	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
+	kitty::{display_kitty_images, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
@@ -236,12 +231,16 @@ async fn main() -> Result<(), WrappedErr> {
 		.prerender
 		.and_then(NonZeroUsize::new)
 		.map_or(PrerenderLimit::All, PrerenderLimit::Limited);
+
+	let cell_height_px = window_size.height / window_size.rows;
+	let cell_width_px = window_size.width / window_size.columns;
 	std::thread::spawn(move || {
 		renderer::start_rendering(
 			&file_path,
 			render_tx,
 			render_rx,
-			window_size,
+			cell_height_px,
+			cell_width_px,
 			prerender,
 			black,
 			white
@@ -419,107 +418,16 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area);
 			})?;
 
-			let mut maybe_err = Ok(());
-			let mut to_replace = Vec::new();
-			for (page_num, img, area) in to_display {
-				let config = DisplayConfig {
-					location: DisplayLocation {
-						x: area.x.into(),
-						y: area.y.into(),
-						..DisplayLocation::default()
-					},
-					..DisplayConfig::default()
-				};
+			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
 
-				log::debug!("looking at img {img:#?}");
-
-				maybe_err = match img {
-					MaybeTransferred::NotYet(image, _map) => {
-						let mut fake_image = KImage {
-							num_or_id: image.num_or_id,
-							format: PixelFormat::Rgb24(
-								ImageDimensions {
-									width: 0,
-									height: 0
-								},
-								None
-							),
-							medium: Medium::Direct {
-								chunk_size: None,
-								data: (&[]).into()
-							}
-						};
-						std::mem::swap(image, &mut fake_image);
-
-						log::debug!("Actually trying to display an image now: {fake_image:?}...");
-
-						let res = run_action(
-							Action::TransmitAndDisplay {
-								image: fake_image,
-								config,
-								placement_id: None
-							},
-							&mut ev_stream
-						)
-						.await;
-
-						log::debug!("And it should've gone through: {res:?}!...");
-
-						match res {
-							Ok(img_id) => {
-								// We need the `_map` to be dropped here, but can't explicitly carry it
-								// over to here. So we're just relying on the overwrite of `img` to
-								// drop `_map` (and thus unmap the memory) for us
-								*img = MaybeTransferred::Transferred(img_id);
-								Ok(())
-							}
-							Err(e) => Err(match e {
-								TransmitError::Writing(action, e) => {
-									if let Action::TransmitAndDisplay {
-										image: failed_img, ..
-									} = *action
-									{
-										*image = failed_img;
-									} else {
-										to_replace.push(page_num);
-									}
-
-									e.to_string()
-								}
-								_ => {
-									to_replace.push(page_num);
-									e.to_string()
-								}
-							})
-						}
-					}
-					MaybeTransferred::Transferred(image_id) => {
-						let e = run_action(
-							Action::Display {
-								image_id: *image_id,
-								placement_id: NonZeroU32::new(1).unwrap(),
-								config
-							},
-							&mut ev_stream
-						)
-						.await
-						.map(|_| ())
-						.map_err(|e| e.to_string());
-
-						log::debug!("Just tried to display: {e:?}");
-						e
-					}
-				};
-			}
-
-			for page_num in to_replace {
-				tui.page_failed_display(page_num);
-			}
-
-			if let Err(e) = maybe_err {
+			if let Err((to_replace, e)) = maybe_err {
 				tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
 					"Couldn't transfer image to the terminal: {e}"
 				))));
+
+				for page_num in to_replace {
+					tui.page_failed_display(page_num);
+				}
 			}
 
 			execute!(stdout().lock(), EndSynchronizedUpdate)?;

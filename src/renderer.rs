@@ -1,6 +1,5 @@
 use std::{thread::sleep, time::Duration};
 
-use crossterm::terminal::WindowSize;
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use itertools::Itertools;
 use mupdf::{
@@ -78,7 +77,8 @@ pub fn start_rendering(
 	path: &str,
 	sender: Sender<Result<RenderInfo, RenderError>>,
 	receiver: Receiver<RenderNotif>,
-	size: WindowSize,
+	col_h: u16,
+	col_w: u16,
 	prerender: PrerenderLimit,
 	black: i32,
 	white: i32
@@ -88,9 +88,7 @@ pub fn start_rendering(
 	let mut search_term = None;
 
 	// And although the font size could theoretically change, we aren't accounting for that right
-	// now, so we just keep this out of the loop.
-	let col_w = size.width / size.columns;
-	let col_h = size.height / size.rows;
+	// now, so we just use the values passed in.
 
 	let mut stored_doc = None;
 	let mut invert = false;

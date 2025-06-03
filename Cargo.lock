@@ -1554,7 +1554,7 @@ dependencies = [
 [[package]]
 name = "kittage"
 version = "0.1.0"
-source = "git+https://github.com/itsjunetime/kittage.git#eb424664bb1c361629e8a196aa50f3a2a96ad49b"
+source = "git+https://github.com/itsjunetime/kittage.git#39c406df59e34a20c7455e5e5810f13567158e2b"
 dependencies = [
  "base64 0.22.1",
  "crossterm",

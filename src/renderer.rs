@@ -52,6 +52,9 @@ struct PrevRender {
 	num_search_found: Option<usize>
 }
 
+const MUPDF_BLACK: i32 = 0;
+const MUPDF_WHITE: i32 = i32::from_be_bytes([0, 0xff, 0xff, 0xff]);
+
 #[inline]
 pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 	vec.clear();
@@ -468,7 +471,7 @@ fn render_single_page_to_ctx(
 	let mut pixmap = page.to_pixmap(&matrix, &colorspace, false, false)?;
 	if invert {
 		pixmap.tint(white, black)?;
-	} else {
+	} else if black != MUPDF_BLACK || white != MUPDF_WHITE {
 		pixmap.tint(black, white)?;
 	}
 

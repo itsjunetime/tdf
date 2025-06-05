@@ -309,6 +309,7 @@ fn on_notify_ev(
 		}
 	}
 }
+
 fn parse_color_to_i32(cs: &str) -> Result<i32, csscolorparser::ParseColorError> {
 	let color = csscolorparser::parse(cs)?;
 	let [r, g, b, _] = color.to_rgba8();

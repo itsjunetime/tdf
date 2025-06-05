@@ -24,7 +24,7 @@ const FILES: [&str; 3] = [
 ];
 
 const BLACK: i32 = 0;
-const WHITE: i32 = 1000;
+const WHITE: i32 = i32::from_be_bytes([0, 0xff, 0xff, 0xff]);
 
 fn render_full(c: &mut Criterion) {
 	for file in FILES {

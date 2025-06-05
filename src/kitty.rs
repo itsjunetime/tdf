@@ -45,7 +45,7 @@ impl<W: Write> Write for DbgWriter<W> {
 pub async fn run_action<'image, 'data, 'es>(
 	action: Action<'image, 'data>,
 	ev_stream: &'es mut EventStream
-) -> Result<ImageId, TransmitError<'image, 'data, <&'es mut EventStream as AsyncInputReader>::Error>>
+) -> Result<ImageId, TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>>
 {
 	let writer = DbgWriter {
 		w: std::io::stdout().lock(),
@@ -85,7 +85,7 @@ pub async fn display_kitty_images(
 		log::debug!("looking at (area {area:?}) img {img:#?}");
 
 		let this_err = match img {
-			MaybeTransferred::NotYet(image, _map) => {
+			MaybeTransferred::NotYet(image) => {
 				let mut fake_image = Image {
 					num_or_id: image.num_or_id,
 					format: PixelFormat::Rgb24(
@@ -118,28 +118,10 @@ pub async fn display_kitty_images(
 
 				match res {
 					Ok(img_id) => {
-						// We need the `_map` to be dropped here, but can't explicitly carry it
-						// over to here. So we're just relying on the overwrite of `img` to
-						// drop `_map` (and thus unmap the memory) for us
 						*img = MaybeTransferred::Transferred(img_id);
 						Ok(())
 					}
-					Err(e) => Err(match e {
-						TransmitError::Writing(action, e) => {
-							let num = if let Action::TransmitAndDisplay {
-								image: failed_img, ..
-							} = *action
-							{
-								*image = failed_img;
-								None
-							} else {
-								Some(page_num)
-							};
-
-							(num, e.to_string())
-						}
-						_ => (Some(page_num), e.to_string())
-					})
+					Err(e) => Err((Some(page_num), e.to_string())),
 				}
 			}
 			MaybeTransferred::Transferred(image_id) => {

@@ -46,9 +46,9 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anstyle"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55cc3b69f167a1ef2e161439aa98aed94e6028e5f9a59be9a6ffb47aef1651f9"
+checksum = "862ed96ca487e809f1c8e5a8447f6ee2cf102f846893800b20cebdf541fc6bbd"
 
 [[package]]
 name = "anyhow"
@@ -298,9 +298,9 @@ checksum = "56ed6191a7e78c36abdb16ab65341eefd73d64d303fffccdbb00d51e4205967b"
 
 [[package]]
 name = "bumpalo"
-version = "3.17.0"
+version = "3.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1628fb46dfa0b37568d12e5edd512553eccf6a22a78e8bde00bb4aed84d5bdbf"
+checksum = "793db76d6187cd04dff33004d8e6c9cc4e05cd330500379d2394209271b4aeee"
 
 [[package]]
 name = "bytemuck"
@@ -343,9 +343,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.24"
+version = "1.2.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16595d3be041c03b09d08d0858631facccee9221e579704070e6e9e4915d3bc7"
+checksum = "d0fc897dc1e865cc67c0e05a836d9d3f1df3cbe442aa4a9473b18e12624a4951"
 dependencies = [
  "jobserver",
  "libc",
@@ -423,18 +423,18 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.38"
+version = "4.5.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed93b9805f8ba930df42c2590f05453d5ec36cbb85d018868a5b24d31f6ac000"
+checksum = "fd60e63e9be68e5fb56422e397cf9baddded06dae1d2e523401542383bc72a9f"
 dependencies = [
  "clap_builder",
 ]
 
 [[package]]
 name = "clap_builder"
-version = "4.5.38"
+version = "4.5.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "379026ff283facf611b0ea629334361c4211d1b12ee01024eec1591133b04120"
+checksum = "89cc6392a1f72bbeb820d71f32108f61fdaf18bc526e1d23954168a67759ef51"
 dependencies = [
  "anstyle",
  "clap_lex",
@@ -713,9 +713,9 @@ dependencies = [
 
 [[package]]
 name = "csscolorparser"
-version = "0.7.0"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46f9a16a848a7fb95dd47ce387ac1ee9a6df879ba784b815537fcd388a1a8288"
+checksum = "5fda6aace1fbef3aa217b27f4c8d7d071ef2a70a5ca51050b1f17d40299d3f16"
 dependencies = [
  "phf",
 ]
@@ -1301,12 +1301,13 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.12"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf9f1e950e0d9d1d3c47184416723cf29c0d1f93bd8cccf37e4beb6b44f31710"
+checksum = "dc2fdfdbff08affe55bb779f33b053aa1fe5dd5b54c257343c17edfa55711bdb"
 dependencies = [
  "bytes",
  "futures-channel",
+ "futures-core",
  "futures-util",
  "http",
  "http-body",
@@ -1545,9 +1546,9 @@ dependencies = [
 
 [[package]]
 name = "libloading"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a793df0d7afeac54f95b471d3af7f0d4fb975699f972341a4b76988d49cdf0c"
+checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
  "windows-targets 0.53.0",
@@ -1603,9 +1604,9 @@ checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
 
 [[package]]
 name = "lock_api"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07af8b9cdd281b7915f413fa73f29ebd5d55d0d3f0155584dade1ff18cea1b17"
+checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
  "autocfg",
  "scopeguard",
@@ -1958,9 +1959,9 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.12.3"
+version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
+checksum = "70d58bf43669b5795d1576d0641cfb6fbb2057bf629506267a92807158584a13"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -1968,9 +1969,9 @@ dependencies = [
 
 [[package]]
 name = "parking_lot_core"
-version = "0.9.10"
+version = "0.9.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e401f977ab385c9e4e3ab30627d6f26d00e2c73eef317493c4ec6d468726cf8"
+checksum = "bc838d2a56b5b1a6c25f55575dfc605fabb63bb2365f6c2353ef9159aa69e4a5"
 dependencies = [
  "cfg-if",
  "libc",
@@ -2324,7 +2325,7 @@ dependencies = [
 [[package]]
 name = "ratatui"
 version = "0.30.0-alpha.4"
-source = "git+https://github.com/itsjunetime/ratatui.git#21171ad0dc1aeb22c5a526a65c3811f09dab72d1"
+source = "git+https://github.com/itsjunetime/ratatui.git#3668e6a069966e4379a68533163d123b5cc81301"
 dependencies = [
  "instability",
  "ratatui-core",
@@ -2337,7 +2338,7 @@ dependencies = [
 [[package]]
 name = "ratatui-core"
 version = "0.1.0-alpha.5"
-source = "git+https://github.com/itsjunetime/ratatui.git#21171ad0dc1aeb22c5a526a65c3811f09dab72d1"
+source = "git+https://github.com/itsjunetime/ratatui.git#3668e6a069966e4379a68533163d123b5cc81301"
 dependencies = [
  "bitflags 2.9.1",
  "compact_str",
@@ -2356,7 +2357,7 @@ dependencies = [
 [[package]]
 name = "ratatui-crossterm"
 version = "0.1.0-alpha.4"
-source = "git+https://github.com/itsjunetime/ratatui.git#21171ad0dc1aeb22c5a526a65c3811f09dab72d1"
+source = "git+https://github.com/itsjunetime/ratatui.git#3668e6a069966e4379a68533163d123b5cc81301"
 dependencies = [
  "crossterm",
  "instability",
@@ -2365,8 +2366,8 @@ dependencies = [
 
 [[package]]
 name = "ratatui-image"
-version = "8.0.0"
-source = "git+https://github.com/itsjunetime/ratatui-image.git?branch=vb64_on_personal#ec22cc93e53a5c290d5eaadea2a0f7afab745e90"
+version = "8.0.1"
+source = "git+https://github.com/itsjunetime/ratatui-image.git?branch=vb64_on_personal#0039c2d470b0b070fb3b6d02d8a4e11fa277921e"
 dependencies = [
  "base64 0.22.1",
  "icy_sixel",
@@ -2381,7 +2382,7 @@ dependencies = [
 [[package]]
 name = "ratatui-macros"
 version = "0.7.0-alpha.3"
-source = "git+https://github.com/itsjunetime/ratatui.git#21171ad0dc1aeb22c5a526a65c3811f09dab72d1"
+source = "git+https://github.com/itsjunetime/ratatui.git#3668e6a069966e4379a68533163d123b5cc81301"
 dependencies = [
  "ratatui-core",
  "ratatui-widgets",
@@ -2390,7 +2391,7 @@ dependencies = [
 [[package]]
 name = "ratatui-termwiz"
 version = "0.1.0-alpha.4"
-source = "git+https://github.com/itsjunetime/ratatui.git#21171ad0dc1aeb22c5a526a65c3811f09dab72d1"
+source = "git+https://github.com/itsjunetime/ratatui.git#3668e6a069966e4379a68533163d123b5cc81301"
 dependencies = [
  "ratatui-core",
  "termwiz",
@@ -2399,7 +2400,7 @@ dependencies = [
 [[package]]
 name = "ratatui-widgets"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/itsjunetime/ratatui.git#21171ad0dc1aeb22c5a526a65c3811f09dab72d1"
+source = "git+https://github.com/itsjunetime/ratatui.git#3668e6a069966e4379a68533163d123b5cc81301"
 dependencies = [
  "bitflags 2.9.1",
  "hashbrown 0.15.3",
@@ -2875,7 +2876,7 @@ dependencies = [
  "cpuprofiler",
  "criterion",
  "crossterm",
- "csscolorparser 0.7.0",
+ "csscolorparser 0.7.2",
  "flume",
  "futures-util",
  "image",
@@ -3848,9 +3849,9 @@ checksum = "3f423a2c17029964870cfaabb1f13dfab7d092a62a29a89264f4d36990ca414a"
 
 [[package]]
 name = "zune-jpeg"
-version = "0.4.14"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99a5bab8d7dedf81405c4bb1f2b83ea057643d9cb28778cea9eecddeedd2e028"
+checksum = "3e4a518c0ea2576f4da876349d7f67a7be489297cd77c2cf9e04c2e05fcd3974"
 dependencies = [
  "zune-core",
 ]

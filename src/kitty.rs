@@ -35,7 +35,6 @@ impl<W: Write> Write for DbgWriter<W> {
 	fn flush(&mut self) -> std::io::Result<()> {
 		#[cfg(debug_assertions)]
 		{
-			log::debug!("wrote {:?}", self.buf);
 			self.buf.clear();
 		}
 		self.w.flush()
@@ -82,8 +81,6 @@ pub async fn display_kitty_images(
 
 		execute!(std::io::stdout(), MoveTo(area.x, area.y)).unwrap();
 
-		log::debug!("looking at (area {area:?}) img {img:#?}");
-
 		let this_err = match img {
 			MaybeTransferred::NotYet(image) => {
 				let mut fake_image = Image {
@@ -102,8 +99,6 @@ pub async fn display_kitty_images(
 				};
 				std::mem::swap(image, &mut fake_image);
 
-				log::debug!("Actually trying to display an image now: {fake_image:?}...");
-
 				let res = run_action(
 					Action::TransmitAndDisplay {
 						image: fake_image,
@@ -114,8 +109,6 @@ pub async fn display_kitty_images(
 				)
 				.await;
 
-				log::debug!("And it should've gone through: {res:?}!...");
-
 				match res {
 					Ok(img_id) => {
 						*img = MaybeTransferred::Transferred(img_id);
@@ -125,7 +118,7 @@ pub async fn display_kitty_images(
 				}
 			}
 			MaybeTransferred::Transferred(image_id) => {
-				let e = run_action(
+				run_action(
 					Action::Display {
 						image_id: *image_id,
 						placement_id: *image_id,
@@ -135,10 +128,7 @@ pub async fn display_kitty_images(
 				)
 				.await
 				.map(|_| ())
-				.map_err(|e| (None, e.to_string()));
-
-				log::debug!("Just tried to display: {e:?}");
-				e
+				.map_err(|e| (None, e.to_string()))
 			}
 		};
 

@@ -17,7 +17,7 @@ use crate::renderer::{PageInfo, RenderError, fill_default};
 
 #[derive(Debug)]
 pub enum MaybeTransferred {
-	NotYet(kittage::image::Image<'static>, memmap2::MmapMut),
+	NotYet(kittage::image::Image<'static>),
 	Transferred(kittage::ImageId)
 }
 
@@ -124,13 +124,13 @@ pub async fn run_conversion_loop(
 
 				match kittage::image::Image::shm_from(
 					dyn_img,
-					format!("__tdf_kittage_{pid}_page_{page_num}").into()
+					&format!("__tdf_kittage_{pid}_page_{page_num}")
 				) {
-					Ok((mut img, map)) => {
+					Ok(mut img) => {
 						img.num_or_id =
 							NumberOrId::Id(NonZeroU32::new(page_num as u32 + 1).unwrap());
 						ConvertedImage::Kitty {
-							img: MaybeTransferred::NotYet(img, map),
+							img: MaybeTransferred::NotYet(img),
 							area
 						}
 					}

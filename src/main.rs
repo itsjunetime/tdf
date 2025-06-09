@@ -427,12 +427,10 @@ async fn enter_redraw_loop(
 
 				if let Err((to_replace, err_desc, enum_err)) = maybe_err {
 					match enum_err {
-						// This is the error that kitty provides us when it deletes an image due to
-						// memory constraints, so if we get it, we just fix it by re-rendering and
-						// don't display it to the user
-						TransmitError::Terminal(TerminalError::NoEntity(e))
-							if e.contains("refers to non-existent image") =>
-							(),
+						// This is the error that kitty & ghostty provide us when they delete an
+						// image due to memory constraints, so if we get it, we just fix it by
+						// re-rendering so it don't display it to the user
+						TransmitError::Terminal(TerminalError::NoEntity(_)) => (),
 						_ => tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
 							"{err_desc}: {enum_err}"
 						))))

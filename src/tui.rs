@@ -41,7 +41,7 @@ pub struct Tui {
 	showing_help_msg: bool
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 struct LastRender {
 	// Used as a way to track if we need to draw the images, to save ratatui from doing a lot of
 	// diffing work

@@ -3015,7 +3015,6 @@ dependencies = [
  "flume",
  "futures-util",
  "image",
- "itertools 0.14.0",
  "kittage",
  "log",
  "memmap2",

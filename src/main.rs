@@ -2,7 +2,7 @@ use core::error::Error;
 use std::{
 	borrow::Cow,
 	ffi::OsString,
-	io::{BufReader, Read, Write, stdout},
+	io::{stdout, BufReader, Read, Stdout, Write},
 	num::{NonZeroU32, NonZeroUsize},
 	path::PathBuf
 };
@@ -20,7 +20,8 @@ use flexi_logger::FileSpec;
 use futures_util::{FutureExt, stream::StreamExt};
 use kittage::{
 	action::Action,
-	delete::{ClearOrDelete, DeleteConfig, WhichToDelete}
+	delete::{ClearOrDelete, DeleteConfig, WhichToDelete},
+	error::{TerminalError, TransmitError}
 };
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -103,17 +104,17 @@ async fn main() -> Result<(), WrappedErr> {
 		maybe_logger =
 			Some(
 				flexi_logger::Logger::try_with_env()
-					.map_err(|e| WrappedErr(format!("Couldn't create initial logger: {e}")))?
+					.map_err(|e| WrappedErr(format!("Couldn't create initial logger: {e}").into()))?
 					.log_to_file(FileSpec::try_from("./debug.log").map_err(|e| {
-						WrappedErr(format!("Couldn't create FileSpec for logger: {e}"))
+						WrappedErr(format!("Couldn't create FileSpec for logger: {e}").into())
 					})?)
 					.start()
-					.map_err(|e| WrappedErr(format!("Can't start logger: {e}")))?
+					.map_err(|e| WrappedErr(format!("Can't start logger: {e}").into()))?
 			);
 	}
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
-	let tui_tx = watch_to_render_tx.clone();
+	let to_renderer = watch_to_render_tx.clone();
 
 	let (render_tx, tui_rx) = flume::unbounded();
 	let watch_to_tui_tx = render_tx.clone();
@@ -247,7 +248,7 @@ async fn main() -> Result<(), WrappedErr> {
 		)
 	});
 
-	let ev_stream = crossterm::event::EventStream::new();
+	let mut ev_stream = crossterm::event::EventStream::new();
 
 	let (to_converter, from_main) = flume::unbounded();
 	let (to_main, from_converter) = flume::unbounded();
@@ -294,12 +295,13 @@ async fn main() -> Result<(), WrappedErr> {
 			}),
 			&mut ev_stream
 		)
-		.await?;
+		.await
+		.map_err(|e| WrappedErr(format!("Couldn't delete all previous images from memory: {e}").into()))?;
 	}
 
 	let fullscreen = flags.fullscreen.unwrap_or_default();
 	let main_area = Tui::main_layout(&term.get_frame(), fullscreen);
-	tui_tx
+	to_renderer
 		.send(RenderNotif::Area(main_area.page_area))
 		.map_err(|e| {
 			WrappedErr(
@@ -312,7 +314,7 @@ async fn main() -> Result<(), WrappedErr> {
 
 	enter_redraw_loop(
 		ev_stream,
-		tui_tx,
+		to_renderer,
 		tui_rx,
 		to_converter,
 		from_converter,
@@ -339,6 +341,8 @@ async fn main() -> Result<(), WrappedErr> {
 	.unwrap();
 	disable_raw_mode().unwrap();
 
+	drop(maybe_logger);
+
 	Ok(())
 }
 
@@ -346,7 +350,7 @@ async fn main() -> Result<(), WrappedErr> {
 #[expect(clippy::too_many_arguments)]
 async fn enter_redraw_loop(
 	mut ev_stream: EventStream,
-	tui_tx: Sender<RenderNotif>,
+	to_renderer: Sender<RenderNotif>,
 	mut tui_rx: RecvStream<'_, Result<RenderInfo, RenderError>>,
 	to_converter: Sender<ConverterMsg>,
 	mut from_converter: RecvStream<'_, Result<ConvertedPage, RenderError>>,
@@ -370,11 +374,11 @@ async fn enter_redraw_loop(
 						InputAction::Redraw => (),
 						InputAction::QuitApp => return Ok(()),
 						InputAction::JumpingToPage(page) => {
-							tui_tx.send(RenderNotif::JumpToPage(page))?;
+							to_renderer.send(RenderNotif::JumpToPage(page))?;
 							to_converter.send(ConverterMsg::GoToPage(page))?;
 						},
-						InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term))?,
-						InputAction::Invert => tui_tx.send(RenderNotif::Invert)?,
+						InputAction::Search(term) => to_renderer.send(RenderNotif::Search(term))?,
+						InputAction::Invert => to_renderer.send(RenderNotif::Invert)?,
 						InputAction::Fullscreen => fullscreen = !fullscreen,
 					}
 				}
@@ -408,7 +412,7 @@ async fn enter_redraw_loop(
 		let new_area = Tui::main_layout(&term.get_frame(), fullscreen);
 		if new_area != main_area {
 			main_area = new_area;
-			tui_tx.send(RenderNotif::Area(main_area.page_area))?;
+			to_renderer.send(RenderNotif::Area(main_area.page_area))?;
 			needs_redraw = true;
 		}
 
@@ -418,32 +422,33 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area);
 			})?;
 
-			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
+			if !to_display.is_empty() {
+				let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
 
-			if let Err((to_replace, e)) = maybe_err {
-				tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
-					"Couldn't transfer image to the terminal: {e}"
-				))));
+				if let Err((to_replace, err_desc, enum_err)) = maybe_err {
+					match enum_err {
+						// This is the error that kitty provides us when it deletes an image due to
+						// memory constraints, so if we get it, we just fix it by re-rendering and
+						// don't display it to the user
+						TransmitError::Terminal(TerminalError::NoEntity(e))
+							if e.contains("refers to non-existent image") =>
+							(),
+						_ => tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
+							"{err_desc}: {enum_err}"
+						))))
+					}
 
-				for page_num in to_replace {
-					tui.page_failed_display(page_num);
+					for page_num in to_replace {
+						tui.page_failed_display(page_num);
+						// So that they get re-rendered and sent over again
+						to_renderer.send(RenderNotif::PageNeedsReRender(page_num))?;
+					}
 				}
 			}
 
 			execute!(stdout().lock(), EndSynchronizedUpdate)?;
 		}
 	}
-
-	execute!(
-		term.backend_mut(),
-		LeaveAlternateScreen,
-		crossterm::cursor::Show
-	)?;
-	disable_raw_mode()?;
-
-	drop(maybe_logger);
-
-	Ok(())
 }
 
 fn on_notify_ev(

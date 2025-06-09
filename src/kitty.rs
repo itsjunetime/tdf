@@ -14,7 +14,6 @@ use ratatui::prelude::Rect;
 
 use crate::converter::MaybeTransferred;
 
-#[derive(Debug)]
 pub struct DbgWriter<W: Write> {
 	w: W,
 	#[cfg(debug_assertions)]
@@ -44,8 +43,7 @@ impl<W: Write> Write for DbgWriter<W> {
 pub async fn run_action<'image, 'data, 'es>(
 	action: Action<'image, 'data>,
 	ev_stream: &'es mut EventStream
-) -> Result<ImageId, TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>>
-{
+) -> Result<ImageId, TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>> {
 	let writer = DbgWriter {
 		w: std::io::stdout().lock(),
 		#[cfg(debug_assertions)]
@@ -57,14 +55,17 @@ pub async fn run_action<'image, 'data, 'es>(
 		.map(|(_, i)| i)
 }
 
-pub async fn display_kitty_images(
+pub async fn display_kitty_images<'es>(
 	images: Vec<(usize, &mut MaybeTransferred, Rect)>,
-	ev_stream: &mut EventStream
-) -> Result<(), (Vec<usize>, String)> {
-	if images.is_empty() {
-		return Ok(());
-	}
-
+	ev_stream: &'es mut EventStream
+) -> Result<
+	(),
+	(
+		Vec<usize>,
+		&'static str,
+		TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>
+	)
+> {
 	run_action(
 		Action::Delete(DeleteConfig {
 			effect: ClearOrDelete::Clear,
@@ -73,7 +74,7 @@ pub async fn display_kitty_images(
 		ev_stream
 	)
 	.await
-	.map_err(|e| (vec![], format!("Couldn't clear previous images: {e}")))?;
+	.map_err(|e| (vec![], "Couldn't clear previous images", e))?;
 
 	let mut err = None;
 	for (page_num, img, area) in images {
@@ -114,34 +115,30 @@ pub async fn display_kitty_images(
 						*img = MaybeTransferred::Transferred(img_id);
 						Ok(())
 					}
-					Err(e) => Err((Some(page_num), e.to_string())),
+					Err(e) => Err((page_num, e))
 				}
 			}
-			MaybeTransferred::Transferred(image_id) => {
-				run_action(
-					Action::Display {
-						image_id: *image_id,
-						placement_id: *image_id,
-						config
-					},
-					ev_stream
-				)
-				.await
-				.map(|_| ())
-				.map_err(|e| (None, e.to_string()))
-			}
+			MaybeTransferred::Transferred(image_id) => run_action(
+				Action::Display {
+					image_id: *image_id,
+					placement_id: *image_id,
+					config
+				},
+				ev_stream
+			)
+			.await
+			.map(|_| ())
+			.map_err(|e| (page_num, e))
 		};
 
 		if let Err((id, e)) = this_err {
 			let e = err.get_or_insert_with(|| (vec![], e));
-			if let Some(id) = id {
-				e.0.push(id);
-			}
+			e.0.push(id);
 		}
 	}
 
 	match err {
-		Some(e) => Err(e),
+		Some((replace, e)) => Err((replace, "Couldn't transfer image to the terminal", e)),
 		None => Ok(())
 	}
 }

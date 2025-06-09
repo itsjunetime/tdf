@@ -30,6 +30,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: Clippy
       run: cargo clippy -- -D warnings
+    - name: Tests
+      run: cargo test
     - name: Check fmt
       run: cargo fmt -- --check
     - name: Run tests

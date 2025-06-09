@@ -16,7 +16,8 @@ use flexi_logger::FileSpec;
 use futures_util::{FutureExt, stream::StreamExt};
 use kittage::{
 	action::Action,
-	delete::{ClearOrDelete, DeleteConfig, WhichToDelete}
+	delete::{ClearOrDelete, DeleteConfig, WhichToDelete},
+	error::{TerminalError, TransmitError}
 };
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -81,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let path = flags.file.canonicalize()?;
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
-	let tui_tx = watch_to_render_tx.clone();
+	let to_renderer = watch_to_render_tx.clone();
 
 	let (render_tx, tui_rx) = flume::unbounded();
 	let watch_to_tui_tx = render_tx.clone();
@@ -215,7 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let mut fullscreen = flags.fullscreen.unwrap_or_default();
 	let mut main_area = Tui::main_layout(&term.get_frame(), fullscreen);
-	tui_tx.send(RenderNotif::Area(main_area.page_area))?;
+	to_renderer.send(RenderNotif::Area(main_area.page_area))?;
 
 	let mut tui_rx = tui_rx.into_stream();
 	let mut from_converter = from_converter.into_stream();
@@ -235,11 +236,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 						InputAction::Redraw => (),
 						InputAction::QuitApp => break,
 						InputAction::JumpingToPage(page) => {
-							tui_tx.send(RenderNotif::JumpToPage(page))?;
+							to_renderer.send(RenderNotif::JumpToPage(page))?;
 							to_converter.send(ConverterMsg::GoToPage(page))?;
 						},
-						InputAction::Search(term) => tui_tx.send(RenderNotif::Search(term))?,
-						InputAction::Invert => tui_tx.send(RenderNotif::Invert)?,
+						InputAction::Search(term) => to_renderer.send(RenderNotif::Search(term))?,
+						InputAction::Invert => to_renderer.send(RenderNotif::Invert)?,
 						InputAction::Fullscreen => fullscreen = !fullscreen,
 					}
 				}
@@ -273,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let new_area = Tui::main_layout(&term.get_frame(), fullscreen);
 		if new_area != main_area {
 			main_area = new_area;
-			tui_tx.send(RenderNotif::Area(main_area.page_area))?;
+			to_renderer.send(RenderNotif::Area(main_area.page_area))?;
 			needs_redraw = true;
 		}
 
@@ -283,15 +284,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 				to_display = tui.render(f, &main_area);
 			})?;
 
-			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
+			if !to_display.is_empty() {
+				let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
 
-			if let Err((to_replace, e)) = maybe_err {
-				tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
-					"Couldn't transfer image to the terminal: {e}"
-				))));
+				if let Err((to_replace, err_desc, enum_err)) = maybe_err {
+					match enum_err {
+						// This is the error that kitty provides us when it deletes an image due to
+						// memory constraints, so if we get it, we just fix it by re-rendering and
+						// don't display it to the user
+						TransmitError::Terminal(TerminalError::NoEntity(e))
+							if e.contains("refers to non-existent image") =>
+							(),
+						_ => tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
+							"{err_desc}: {enum_err}"
+						))))
+					}
 
-				for page_num in to_replace {
-					tui.page_failed_display(page_num);
+					for page_num in to_replace {
+						tui.page_failed_display(page_num);
+						// So that they get re-rendered and sent over again
+						to_renderer.send(RenderNotif::PageNeedsReRender(page_num))?;
+					}
 				}
 			}
 

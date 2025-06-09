@@ -1,9 +1,8 @@
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt;
 use image::DynamicImage;
-use itertools::Itertools;
 use kittage::NumberOrId;
 use ratatui::layout::Rect;
 use ratatui_image::{
@@ -13,9 +12,11 @@ use ratatui_image::{
 };
 use rayon::iter::ParallelIterator;
 
-use crate::renderer::{PageInfo, RenderError, fill_default};
+use crate::{
+	renderer::{PageInfo, RenderError, fill_default},
+	skip::InterleavedAroundWithMax
+};
 
-#[derive(Debug)]
 pub enum MaybeTransferred {
 	NotYet(kittage::image::Image<'static>),
 	Transferred(kittage::ImageId)
@@ -74,13 +75,19 @@ pub async fn run_conversion_loop(
 		let idx_start = page.saturating_sub(prerender / 2);
 		let idx_end = idx_start.saturating_add(prerender).min(images.len());
 
+		// If there's none to render, then why bother.
+		let Some(idx_end) = NonZeroUsize::new(idx_end) else {
+			return Ok(None);
+		};
+
 		// then we go through all the indices available to us and find the first one that has an
 		// image available to steal
-		let Some((page_info, new_iter, page_num)) = (idx_start..page)
-			.interleave(page..idx_end)
-			.enumerate()
-			// .skip(*iteration)
-			.find_map(|(i_idx, p_idx)| images[p_idx].take().map(|p| (p, i_idx, p_idx)))
+		let Some((page_info, new_iter, page_num)) =
+			InterleavedAroundWithMax::new(page, idx_start, idx_end)
+				.enumerate()
+				.take(prerender)
+				// .skip(*iteration)
+				.find_map(|(i_idx, p_idx)| images[p_idx].take().map(|p| (p, i_idx, p_idx)))
 		else {
 			return Ok(None);
 		};

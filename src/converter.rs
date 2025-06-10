@@ -52,7 +52,8 @@ pub async fn run_conversion_loop(
 	sender: Sender<Result<ConvertedPage, RenderError>>,
 	receiver: Receiver<ConverterMsg>,
 	mut picker: Picker,
-	prerender: usize
+	prerender: usize,
+	shms_work: bool
 ) -> Result<(), SendError<Result<ConvertedPage, RenderError>>> {
 	let mut images = vec![];
 	let mut page: usize = 0;
@@ -64,7 +65,8 @@ pub async fn run_conversion_loop(
 		page: usize,
 		iteration: &mut usize,
 		prerender: usize,
-		pid: u32
+		pid: u32,
+		shms_work: bool
 	) -> Result<Option<ConvertedPage>, RenderError> {
 		if images.is_empty() || *iteration >= prerender {
 			return Ok(None);
@@ -117,10 +119,6 @@ pub async fn run_conversion_loop(
 			y: 0
 		};
 
-		// We don't actually want to Crop this image, but we've already
-		// verified (with the ImageSurface stuff) that the image is the correct
-		// size for the area given, so to save ratatui the work of having to
-		// resize it, we tell them to crop it to fit.
 		let txt_img = match picker.protocol_type() {
 			ProtocolType::Kitty => {
 				let area = ratatui_image::protocol::ImageSource::round_pixel_size_to_cells(
@@ -129,24 +127,20 @@ pub async fn run_conversion_loop(
 					picker.font_size()
 				);
 
-				match kittage::image::Image::shm_from(
-					dyn_img,
-					&format!("__tdf_kittage_{pid}_page_{page_num}")
-				) {
-					Ok(mut img) => {
-						img.num_or_id =
-							NumberOrId::Id(NonZeroU32::new(page_num as u32 + 1).unwrap());
-						ConvertedImage::Kitty {
-							img: MaybeTransferred::NotYet(img),
-							area
-						}
-					}
-					// todo: fallback to non-shm image here without cloning dyn_img above
-					// Err(_) => ConvertedImage::Kitty(dyn_img.into())
-					Err(e) =>
-						return Err(RenderError::Converting(format!(
-							"Couldn't write to shm: {e}"
-						))),
+				let mut img = if shms_work {
+					kittage::image::Image::shm_from(
+						dyn_img,
+						&format!("__tdf_kittage_{pid}_page_{page_num}")
+					)
+					.map_err(|e| RenderError::Converting(format!("Couldn't write to shm: {e}")))?
+				} else {
+					kittage::image::Image::from(dyn_img)
+				};
+
+				img.num_or_id = NumberOrId::Id(NonZeroU32::new(page_num as u32 + 1).unwrap());
+				ConvertedImage::Kitty {
+					img: MaybeTransferred::NotYet(img),
+					area
 				}
 			}
 			_ => ConvertedImage::Generic(
@@ -203,7 +197,8 @@ pub async fn run_conversion_loop(
 				page,
 				&mut iteration,
 				prerender,
-				pid
+				pid,
+				shms_work
 			) {
 				Ok(None) => break,
 				Ok(Some(img)) => sender.send(Ok(img))?,

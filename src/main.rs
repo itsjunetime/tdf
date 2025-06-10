@@ -29,7 +29,7 @@ use ratatui_image::picker::{Picker, ProtocolType};
 use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
-	kitty::{display_kitty_images, run_action},
+	kitty::{display_kitty_images, do_shms_work, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
@@ -254,7 +254,12 @@ async fn main() -> Result<(), WrappedErr> {
 	let (to_main, from_converter) = flume::unbounded();
 
 	let is_kitty = picker.protocol_type() == ProtocolType::Kitty;
-	tokio::spawn(run_conversion_loop(to_main, from_main, picker, 20));
+
+	let shms_work = is_kitty && do_shms_work(&mut ev_stream).await;
+
+	tokio::spawn(run_conversion_loop(
+		to_main, from_main, picker, 20, shms_work
+	));
 
 	let file_name = path.file_name().map_or_else(
 		|| "Unknown file".into(),
@@ -430,6 +435,10 @@ async fn enter_redraw_loop(
 						// This is the error that kitty & ghostty provide us when they delete an
 						// image due to memory constraints, so if we get it, we just fix it by
 						// re-rendering so it don't display it to the user
+						//
+						// [TODO] maybe when we detect that an image was deleted, we probe the
+						// terminal for the pages around it to see if they were deleted too and if
+						// they were, we re-render them? idk
 						TransmitError::Terminal(TerminalError::NoEntity(_)) => (),
 						_ => tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
 							"{err_desc}: {enum_err}"

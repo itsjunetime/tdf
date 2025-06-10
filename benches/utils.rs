@@ -122,7 +122,9 @@ pub fn start_converting_loop(
 		to_main_tx,
 		from_main_rx,
 		picker,
-		prerender
+		prerender,
+		// just assume shms work for now, who cares
+		true
 	));
 
 	let from_converter_rx = from_converter_rx.into_stream();

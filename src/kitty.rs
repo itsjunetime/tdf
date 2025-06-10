@@ -1,8 +1,14 @@
-use std::io::Write;
+use std::{io::Write, num::NonZeroU32};
 
-use crossterm::{cursor::MoveTo, event::EventStream, execute};
+use crossterm::{
+	cursor::MoveTo,
+	event::EventStream,
+	execute,
+	terminal::{disable_raw_mode, enable_raw_mode}
+};
+use image::DynamicImage;
 use kittage::{
-	AsyncInputReader, ImageDimensions, ImageId, PixelFormat,
+	AsyncInputReader, ImageDimensions, ImageId, NumberOrId, PixelFormat,
 	action::Action,
 	delete::{ClearOrDelete, DeleteConfig, WhichToDelete},
 	display::DisplayConfig,
@@ -53,6 +59,26 @@ pub async fn run_action<'image, 'data, 'es>(
 		.execute_async(writer, ev_stream)
 		.await
 		.map(|(_, i)| i)
+}
+
+pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
+	let img = DynamicImage::new_rgb8(1, 1);
+	let pid = std::process::id();
+	let Ok(mut k_img) = kittage::image::Image::shm_from(img, &format!("__tdf_kittage_test_{pid}"))
+	else {
+		return false;
+	};
+
+	// apparently the terminal won't respond to queries unless they have an Id instead of a number
+	k_img.num_or_id = NumberOrId::Id(NonZeroU32::new(u32::MAX).unwrap());
+
+	enable_raw_mode().unwrap();
+
+	let res = run_action(Action::Query(&k_img), ev_stream).await;
+
+	disable_raw_mode().unwrap();
+
+	res.is_ok()
 }
 
 pub async fn display_kitty_images<'es>(

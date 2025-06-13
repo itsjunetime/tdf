@@ -20,6 +20,12 @@ use ratatui::prelude::Rect;
 
 use crate::converter::MaybeTransferred;
 
+pub enum KittyDisplay<'tui> {
+	NoChange,
+	ClearImages,
+	DisplayImages(Vec<(usize, &'tui mut MaybeTransferred, Rect)>)
+}
+
 pub struct DbgWriter<W: Write> {
 	w: W,
 	#[cfg(debug_assertions)]
@@ -82,7 +88,7 @@ pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
 }
 
 pub async fn display_kitty_images<'es>(
-	images: Vec<(usize, &mut MaybeTransferred, Rect)>,
+	display: KittyDisplay<'_>,
 	ev_stream: &'es mut EventStream
 ) -> Result<
 	(),
@@ -92,15 +98,26 @@ pub async fn display_kitty_images<'es>(
 		TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>
 	)
 > {
-	run_action(
-		Action::Delete(DeleteConfig {
-			effect: ClearOrDelete::Clear,
-			which: WhichToDelete::All
-		}),
-		ev_stream
-	)
-	.await
-	.map_err(|e| (vec![], "Couldn't clear previous images", e))?;
+	let images = match display {
+		KittyDisplay::NoChange => return Ok(()),
+		KittyDisplay::DisplayImages(_) | KittyDisplay::ClearImages => {
+			run_action(
+				Action::Delete(DeleteConfig {
+					effect: ClearOrDelete::Clear,
+					which: WhichToDelete::All
+				}),
+				ev_stream
+			)
+			.await
+			.map_err(|e| (vec![], "Couldn't clear previous images", e))?;
+
+			let KittyDisplay::DisplayImages(images) = display else {
+				return Ok(());
+			};
+
+			images
+		}
+	};
 
 	let mut err = None;
 	for (page_num, img, area) in images {

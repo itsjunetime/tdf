@@ -24,6 +24,7 @@ use ratatui_image::Image;
 
 use crate::{
 	converter::{ConvertedImage, MaybeTransferred},
+	kitty::KittyDisplay,
 	renderer::{RenderError, fill_default},
 	skip::Skip
 };
@@ -133,10 +134,10 @@ impl Tui {
 		&'s mut self,
 		frame: &mut Frame<'_>,
 		full_layout: &RenderLayout
-	) -> Vec<(usize, &'s mut MaybeTransferred, Rect)> {
+	) -> KittyDisplay<'s> {
 		if self.showing_help_msg {
 			self.render_help_msg(frame);
-			return vec![];
+			return KittyDisplay::ClearImages;
 		}
 
 		if let Some((top_area, bottom_area)) = full_layout.top_and_bottom {
@@ -243,7 +244,7 @@ impl Tui {
 			// be written and set to skip it so that ratatui doesn't spend a lot of time diffing it
 			// each re-render
 			frame.render_widget(Skip::new(true), img_area);
-			vec![]
+			KittyDisplay::NoChange
 		} else {
 			// here we calculate how many pages can fit in the available area.
 			let mut test_area_w = img_area.width;
@@ -279,7 +280,7 @@ impl Tui {
 			if page_widths.is_empty() {
 				// If none are ready to render, just show the loading thing
 				Self::render_loading_in(frame, img_area);
-				vec![]
+				KittyDisplay::ClearImages
 			} else {
 				execute!(stdout(), BeginSynchronizedUpdate).unwrap();
 
@@ -306,7 +307,7 @@ impl Tui {
 				// then the whole diffing thing messes it up
 				self.last_render.rect = size;
 
-				to_display
+				KittyDisplay::DisplayImages(to_display)
 			}
 		}
 	}

@@ -29,7 +29,7 @@ use ratatui_image::picker::{Picker, ProtocolType};
 use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
-	kitty::{display_kitty_images, do_shms_work, run_action},
+	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
@@ -422,34 +422,32 @@ async fn enter_redraw_loop(
 		}
 
 		if needs_redraw {
-			let mut to_display = vec![];
+			let mut to_display = KittyDisplay::NoChange;
 			term.draw(|f| {
 				to_display = tui.render(f, &main_area);
 			})?;
 
-			if !to_display.is_empty() {
-				let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
+			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
 
-				if let Err((to_replace, err_desc, enum_err)) = maybe_err {
-					match enum_err {
-						// This is the error that kitty & ghostty provide us when they delete an
-						// image due to memory constraints, so if we get it, we just fix it by
-						// re-rendering so it don't display it to the user
-						//
-						// [TODO] maybe when we detect that an image was deleted, we probe the
-						// terminal for the pages around it to see if they were deleted too and if
-						// they were, we re-render them? idk
-						TransmitError::Terminal(TerminalError::NoEntity(_)) => (),
-						_ => tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
-							"{err_desc}: {enum_err}"
-						))))
-					}
+			if let Err((to_replace, err_desc, enum_err)) = maybe_err {
+				match enum_err {
+					// This is the error that kitty & ghostty provide us when they delete an
+					// image due to memory constraints, so if we get it, we just fix it by
+					// re-rendering so it don't display it to the user
+					//
+					// [TODO] maybe when we detect that an image was deleted, we probe the
+					// terminal for the pages around it to see if they were deleted too and if
+					// they were, we re-render them? idk
+					TransmitError::Terminal(TerminalError::NoEntity(_)) => (),
+					_ => tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
+						"{err_desc}: {enum_err}"
+					))))
+				}
 
-					for page_num in to_replace {
-						tui.page_failed_display(page_num);
-						// So that they get re-rendered and sent over again
-						to_renderer.send(RenderNotif::PageNeedsReRender(page_num))?;
-					}
+				for page_num in to_replace {
+					tui.page_failed_display(page_num);
+					// So that they get re-rendered and sent over again
+					to_renderer.send(RenderNotif::PageNeedsReRender(page_num))?;
 				}
 			}
 

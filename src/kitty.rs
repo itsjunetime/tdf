@@ -11,19 +11,26 @@ use kittage::{
 	AsyncInputReader, ImageDimensions, ImageId, NumberOrId, PixelFormat,
 	action::Action,
 	delete::{ClearOrDelete, DeleteConfig, WhichToDelete},
-	display::DisplayConfig,
+	display::{DisplayConfig, DisplayLocation},
 	error::TransmitError,
 	image::Image,
 	medium::Medium
 };
-use ratatui::prelude::Rect;
+use ratatui::layout::Position;
 
 use crate::converter::MaybeTransferred;
+
+pub struct KittyReadyToDisplay<'tui> {
+	pub img: &'tui mut MaybeTransferred,
+	pub page_num: usize,
+	pub pos: Position,
+	pub display_loc: DisplayLocation
+}
 
 pub enum KittyDisplay<'tui> {
 	NoChange,
 	ClearImages,
-	DisplayImages(Vec<(usize, &'tui mut MaybeTransferred, Rect)>)
+	DisplayImages(Vec<KittyReadyToDisplay<'tui>>)
 }
 
 pub struct DbgWriter<W: Write> {
@@ -46,6 +53,7 @@ impl<W: Write> Write for DbgWriter<W> {
 	fn flush(&mut self) -> std::io::Result<()> {
 		#[cfg(debug_assertions)]
 		{
+			log::debug!("Writing to kitty: {:?}", self.buf);
 			self.buf.clear();
 		}
 		self.w.flush()
@@ -120,10 +128,19 @@ pub async fn display_kitty_images<'es>(
 	};
 
 	let mut err = None;
-	for (page_num, img, area) in images {
-		let config = DisplayConfig::default();
+	for KittyReadyToDisplay {
+		img,
+		page_num,
+		pos,
+		display_loc
+	} in images
+	{
+		let config = DisplayConfig {
+			location: display_loc,
+			..DisplayConfig::default()
+		};
 
-		execute!(std::io::stdout(), MoveTo(area.x, area.y)).unwrap();
+		execute!(std::io::stdout(), MoveTo(pos.x, pos.y)).unwrap();
 
 		let this_err = match img {
 			MaybeTransferred::NotYet(image) => {
@@ -155,6 +172,8 @@ pub async fn display_kitty_images<'es>(
 
 				match res {
 					Ok(img_id) => {
+						// TODO: Re-add this or at least make sure this sort of thing does happen
+						// fake_image.unlink_if_shm();
 						*img = MaybeTransferred::Transferred(img_id);
 						Ok(())
 					}

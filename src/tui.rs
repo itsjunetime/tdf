@@ -8,23 +8,24 @@ use crossterm::{
 		enable_raw_mode
 	}
 };
+use kittage::display::DisplayLocation;
 use nix::{
 	sys::signal::{Signal::SIGSTOP, kill},
 	unistd::Pid
 };
 use ratatui::{
 	Frame,
-	layout::{Constraint, Flex, Layout, Rect},
+	layout::{Constraint, Flex, Layout, Position, Rect},
 	style::{Color, Style},
 	symbols::border,
 	text::{Span, Text},
 	widgets::{Block, Borders, Clear, Padding}
 };
-use ratatui_image::Image;
+use ratatui_image::{FontSize, Image};
 
 use crate::{
 	converter::{ConvertedImage, MaybeTransferred},
-	kitty::KittyDisplay,
+	kitty::{KittyDisplay, KittyReadyToDisplay},
 	renderer::{RenderError, fill_default},
 	skip::Skip
 };
@@ -39,7 +40,8 @@ pub struct Tui {
 	prev_msg: Option<BottomMessage>,
 	rendered: Vec<RenderedInfo>,
 	page_constraints: PageConstraints,
-	showing_help_msg: bool
+	showing_help_msg: bool,
+	zoom: Option<Zoom>
 }
 
 #[derive(Default)]
@@ -71,6 +73,19 @@ struct PageConstraints {
 	r_to_l: bool
 }
 
+#[derive(Default)]
+struct Zoom {
+	// just how much 'zoom' you have. Doesn't relate to anything specific yet, except that 0 means
+	// it fills the screen (instead of fits)
+	level: u16,
+	// how many terminal-cells worth of content overflow the left side of the screen (and are thus
+	// not displayed)
+	cell_pan_from_left: u16,
+	// how many terminal-cells worth of content overflow the top side of the screen (and are thus
+	// not displayed)
+	cell_pan_from_top: u16
+}
+
 // This seems like a kinda weird struct because it holds two optionals but any representation
 // within it is valid; I think it's the best way to represent it
 #[derive(Default)]
@@ -100,7 +115,8 @@ impl Tui {
 			last_render: LastRender::default(),
 			rendered: vec![],
 			page_constraints: PageConstraints { max_wide, r_to_l },
-			showing_help_msg: false
+			showing_help_msg: false,
+			zoom: None
 		}
 	}
 
@@ -133,106 +149,23 @@ impl Tui {
 	pub fn render<'s>(
 		&'s mut self,
 		frame: &mut Frame<'_>,
-		full_layout: &RenderLayout
+		full_layout: &RenderLayout,
+		font_size: FontSize
 	) -> KittyDisplay<'s> {
 		if self.showing_help_msg {
 			self.render_help_msg(frame);
 			return KittyDisplay::ClearImages;
 		}
 
-		if let Some((top_area, bottom_area)) = full_layout.top_and_bottom {
-			let top_block = Block::new()
-				.padding(Padding {
-					right: 2,
-					left: 2,
-					..Padding::default()
-				})
-				.borders(Borders::BOTTOM);
-
-			let top_area = top_block.inner(top_area);
-
-			let page_nums_text = format!("{} / {}", self.page + 1, self.rendered.len());
-
-			let top_layout = Layout::horizontal([
-				Constraint::Fill(1),
-				Constraint::Length(page_nums_text.len() as u16)
-			])
-			.split(top_area);
-
-			let title = Span::styled(&self.name, Style::new().fg(Color::Cyan));
-
-			let page_nums = Span::styled(&page_nums_text, Style::new().fg(Color::Cyan));
-
-			frame.render_widget(top_block, top_area);
-			frame.render_widget(title, top_layout[0]);
-			frame.render_widget(page_nums, top_layout[1]);
-
-			let bottom_block = Block::new()
-				.padding(Padding {
-					top: 1,
-					right: 2,
-					left: 2,
-					bottom: 0
-				})
-				.borders(Borders::TOP);
-			let bottom_inside_block = bottom_block.inner(bottom_area);
-
-			frame.render_widget(bottom_block, bottom_area);
-
-			let rendered_str = if !self.rendered.is_empty() {
-				format!(
-					"Rendered: {}%",
-					(self.rendered.iter().filter(|i| i.img.is_some()).count() * 100)
-						/ self.rendered.len()
-				)
-			} else {
-				String::new()
-			};
-			let bottom_layout = Layout::horizontal([
-				Constraint::Fill(1),
-				Constraint::Length(rendered_str.len() as u16)
-			])
-			.split(bottom_inside_block);
-
-			let rendered_span = Span::styled(&rendered_str, Style::new().fg(Color::Cyan));
-			frame.render_widget(rendered_span, bottom_layout[1]);
-
-			let (msg_str, color): (Cow<'_, str>, _) = match self.bottom_msg {
-				BottomMessage::Help => ("?: Show help page".into(), Color::Blue),
-				BottomMessage::Error(ref e) => (e.as_str().into(), Color::Red),
-				BottomMessage::Input(ref input_state) => (
-					match input_state {
-						InputCommand::GoToPage(page) => format!("Go to: {page}"),
-						InputCommand::Search(s) => format!("Search: {s}")
-					}
-					.into(),
-					Color::Blue
-				),
-				BottomMessage::SearchResults(ref term) => {
-					let num_found = self
-						.rendered
-						.iter()
-						.filter_map(|r| r.num_results)
-						.sum::<usize>();
-					let num_searched = self
-						.rendered
-						.iter()
-						.filter(|r| r.num_results.is_some())
-						.count() * 100;
-					(
-						format!(
-							"Results for '{term}': {num_found} (searched: {}%)",
-							num_searched / self.rendered.len()
-						)
-						.into(),
-						Color::Blue
-					)
-				}
-				BottomMessage::Reloaded => ("Document was reloaded!".into(), Color::Blue)
-			};
-
-			let span = Span::styled(msg_str, Style::new().fg(color));
-			frame.render_widget(span, bottom_layout[0]);
+		if let Some(t_and_b) = full_layout.top_and_bottom {
+			Self::render_top_and_bottom(
+				t_and_b,
+				self.page,
+				&self.rendered,
+				&self.name,
+				frame,
+				&self.bottom_msg
+			);
 		}
 
 		let mut img_area = full_layout.page_area;
@@ -246,6 +179,60 @@ impl Tui {
 			frame.render_widget(Skip::new(true), img_area);
 			KittyDisplay::NoChange
 		} else {
+			if let Some(ref zoom) = self.zoom {
+				// yes this is ugly and I hate it. it's due to the limitations that currently exist
+				// in the borrow checker. Once `-Zpolonius=next` is stabilized, we can rework this
+				// to look like what we expect.
+				// See https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#problem-case-3-conditional-control-flow-across-functions
+				// You can also rewrite this to just if an `if let` and run it under
+				// `RUSTFLAGS="-Zpolonius=next"` and see that it works
+				if self.rendered[self.page]
+					.img
+					.as_ref()
+					.is_some_and(|c| matches!(c, ConvertedImage::Kitty { .. }))
+				{
+					log::debug!("we're inside, it's kitty");
+					let Some(ConvertedImage::Kitty { ref mut img, area }) =
+						self.rendered[self.page].img
+					else {
+						unreachable!()
+					};
+
+					let img_width = f32::from(area.width);
+					let img_height = f32::from(area.height);
+					let available_to_real_width_ratio = f32::from(img_area.width) / img_width;
+					let available_to_real_height_ratio = f32::from(img_area.height) / img_height;
+
+					let (width, height) =
+						if available_to_real_width_ratio > available_to_real_height_ratio {
+							(img_width, img_height / available_to_real_width_ratio)
+						} else {
+							(img_width / available_to_real_height_ratio, img_height)
+						};
+
+					let width = (width * f32::from(font_size.0)) as u32;
+					let height = (height * f32::from(font_size.1)) as u32;
+
+					return KittyDisplay::DisplayImages(vec![KittyReadyToDisplay {
+						img,
+						page_num: self.page,
+						pos: Position {
+							x: img_area.x,
+							y: img_area.y
+						},
+						display_loc: DisplayLocation {
+							x: u32::from(zoom.cell_pan_from_left) * u32::from(font_size.0),
+							y: u32::from(zoom.cell_pan_from_top) * u32::from(font_size.1),
+							width,
+							height,
+							columns: img_area.width,
+							rows: img_area.height,
+							..DisplayLocation::default()
+						}
+					}]);
+				}
+			};
+
 			// here we calculate how many pages can fit in the available area.
 			let mut test_area_w = img_area.width;
 			// go through our pages, starting at the first one we want to view
@@ -299,7 +286,12 @@ impl Tui {
 						let maybe_img =
 							Self::render_single_page(frame, img, Rect { width, ..img_area });
 						img_area.x += width;
-						maybe_img.map(|(img, r)| (idx + self.page, img, r))
+						maybe_img.map(|(img, pos)| KittyReadyToDisplay {
+							img,
+							page_num: idx + self.page,
+							pos,
+							display_loc: DisplayLocation::default()
+						})
 					})
 					.collect::<Vec<_>>();
 
@@ -316,17 +308,15 @@ impl Tui {
 		frame: &mut Frame<'_>,
 		page_img: &'img mut ConvertedImage,
 		img_area: Rect
-	) -> Option<(&'img mut MaybeTransferred, Rect)> {
+	) -> Option<(&'img mut MaybeTransferred, Position)> {
 		match page_img {
 			ConvertedImage::Generic(page_img) => {
 				frame.render_widget(Image::new(page_img), img_area);
 				None
 			}
-			ConvertedImage::Kitty { img, area } => Some((img, Rect {
+			ConvertedImage::Kitty { img, area } => Some((img, Position {
 				x: img_area.x,
-				y: img_area.y,
-				width: area.width,
-				height: area.height
+				y: img_area.y
 			}))
 		}
 	}
@@ -408,6 +398,100 @@ impl Tui {
 
 	pub fn got_num_results_on_page(&mut self, page_num: usize, num_results: usize) {
 		self.rendered[page_num].num_results = Some(num_results);
+	}
+
+	pub fn render_top_and_bottom(
+		(top_area, bottom_area): (Rect, Rect),
+		page_num: usize,
+		rendered: &[RenderedInfo],
+		doc_name: &str,
+		frame: &mut Frame<'_>,
+		bottom_msg: &BottomMessage
+	) {
+		let top_block = Block::new()
+			.padding(Padding {
+				right: 2,
+				left: 2,
+				..Padding::default()
+			})
+			.borders(Borders::BOTTOM);
+
+		let top_area = top_block.inner(top_area);
+
+		let page_nums_text = format!("{} / {}", page_num + 1, rendered.len());
+
+		let top_layout = Layout::horizontal([
+			Constraint::Fill(1),
+			Constraint::Length(page_nums_text.len() as u16)
+		])
+		.split(top_area);
+
+		let title = Span::styled(doc_name, Style::new().fg(Color::Cyan));
+
+		let page_nums = Span::styled(&page_nums_text, Style::new().fg(Color::Cyan));
+
+		frame.render_widget(top_block, top_area);
+		frame.render_widget(title, top_layout[0]);
+		frame.render_widget(page_nums, top_layout[1]);
+
+		let bottom_block = Block::new()
+			.padding(Padding {
+				top: 1,
+				right: 2,
+				left: 2,
+				bottom: 0
+			})
+			.borders(Borders::TOP);
+		let bottom_inside_block = bottom_block.inner(bottom_area);
+
+		frame.render_widget(bottom_block, bottom_area);
+
+		let rendered_str = if !rendered.is_empty() {
+			format!(
+				"Rendered: {}%",
+				(rendered.iter().filter(|i| i.img.is_some()).count() * 100) / rendered.len()
+			)
+		} else {
+			String::new()
+		};
+		let bottom_layout = Layout::horizontal([
+			Constraint::Fill(1),
+			Constraint::Length(rendered_str.len() as u16)
+		])
+		.split(bottom_inside_block);
+
+		let rendered_span = Span::styled(&rendered_str, Style::new().fg(Color::Cyan));
+		frame.render_widget(rendered_span, bottom_layout[1]);
+
+		let (msg_str, color): (Cow<'_, str>, _) = match bottom_msg {
+			BottomMessage::Help => ("?: Show help page".into(), Color::Blue),
+			BottomMessage::Error(e) => (e.as_str().into(), Color::Red),
+			BottomMessage::Input(input_state) => (
+				match input_state {
+					InputCommand::GoToPage(page) => format!("Go to: {page}"),
+					InputCommand::Search(s) => format!("Search: {s}")
+				}
+				.into(),
+				Color::Blue
+			),
+			BottomMessage::SearchResults(term) => {
+				let num_found = rendered.iter().filter_map(|r| r.num_results).sum::<usize>();
+				let num_searched =
+					rendered.iter().filter(|r| r.num_results.is_some()).count() * 100;
+				(
+					format!(
+						"Results for '{term}': {num_found} (searched: {}%)",
+						num_searched / rendered.len()
+					)
+					.into(),
+					Color::Blue
+				)
+			}
+			BottomMessage::Reloaded => ("Document was reloaded!".into(), Color::Blue)
+		};
+
+		let span = Span::styled(msg_str, Style::new().fg(color));
+		frame.render_widget(span, bottom_layout[0]);
 	}
 
 	pub fn handle_event(&mut self, ev: &Event) -> Option<InputAction> {
@@ -521,6 +605,42 @@ impl Tui {
 								)
 								.unwrap();
 
+								self.last_render.rect = Rect::default();
+								Some(InputAction::Redraw)
+							}
+							'z' => {
+								self.zoom = match self.zoom {
+									None => Some(Zoom::default()),
+									Some(_) => None
+								};
+								self.last_render.rect = Rect::default();
+								Some(InputAction::Redraw)
+							}
+							'L' => {
+								if let Some(z) = &mut self.zoom {
+									z.cell_pan_from_left = z.cell_pan_from_left.saturating_add(1);
+								}
+								self.last_render.rect = Rect::default();
+								Some(InputAction::Redraw)
+							}
+							'H' => {
+								if let Some(z) = &mut self.zoom {
+									z.cell_pan_from_left = z.cell_pan_from_left.saturating_sub(1);
+								}
+								self.last_render.rect = Rect::default();
+								Some(InputAction::Redraw)
+							}
+							'J' => {
+								if let Some(z) = &mut self.zoom {
+									z.cell_pan_from_top = z.cell_pan_from_top.saturating_add(1);
+								}
+								self.last_render.rect = Rect::default();
+								Some(InputAction::Redraw)
+							}
+							'K' => {
+								if let Some(z) = &mut self.zoom {
+									z.cell_pan_from_top = z.cell_pan_from_top.saturating_sub(1);
+								}
 								self.last_render.rect = Rect::default();
 								Some(InputAction::Redraw)
 							}

@@ -2,7 +2,7 @@ use core::error::Error;
 use std::{
 	borrow::Cow,
 	ffi::OsString,
-	io::{stdout, BufReader, Read, Stdout, Write},
+	io::{stdout, BufReader, Read, Stdout},
 	num::{NonZeroU32, NonZeroUsize},
 	path::PathBuf
 };
@@ -25,7 +25,7 @@ use kittage::{
 };
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use ratatui_image::picker::{Picker, ProtocolType};
+use ratatui_image::{picker::{Picker, ProtocolType}, FontSize};
 use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
@@ -152,68 +152,10 @@ async fn main() -> Result<(), WrappedErr> {
 	})?;
 
 	if window_size.width == 0 || window_size.height == 0 {
-		// send the command code to get the terminal window size
-		print!("\x1b[14t");
-		std::io::stdout().flush().unwrap();
+		let (w, h) = get_font_size_through_stdio()?;
 
-		// we need to enable raw mode here since this bit of output won't print a newline; it'll
-		// just print the info it wants to tell us. So we want to get all characters as they come
-		enable_raw_mode().map_err(|e| {
-			WrappedErr(
-				format!("Can't enable raw mode, which is necessary to receive input: {e}").into()
-			)
-		})?;
-
-		// read in the returned size until we hit a 't' (which indicates to us it's done)
-		let input_vec = BufReader::new(std::io::stdin())
-			.bytes()
-			.filter_map(Result::ok)
-			.take_while(|b| *b != b't')
-			.collect::<Vec<_>>();
-
-		// and then disable raw mode again in case we return an error in this next section
-		disable_raw_mode().map_err(|e| {
-			WrappedErr(format!("Can't put the terminal back into a normal input state: {e}").into())
-		})?;
-
-		let input_line = String::from_utf8(input_vec).map_err(|e| {
-			WrappedErr(
-				format!(
-					"The terminal responded to our request for its font size by providing non-utf8 data: {e}"
-				)
-				.into()
-			)
-		})?;
-		let input_line = input_line
-			.trim_start_matches("\x1b[4")
-			.trim_start_matches(';');
-
-		// it should input it to us as `\e[4;<height>;<width>t`, so we need to split to get the h/w
-		// ignore the first val
-		let mut splits = input_line.split([';', 't']);
-
-		let (Some(h), Some(w)) = (splits.next(), splits.next()) else {
-			return Err(WrappedErr(
-				format!("Terminal responded with unparseable size response '{input_line}'").into()
-			));
-		};
-
-		window_size.height = h.parse::<u16>().map_err(|_| {
-			WrappedErr(
-				format!(
-					"Your terminal said its height is {h}, but that is not a 16-bit unsigned integer"
-				)
-				.into()
-			)
-		})?;
-		window_size.width = w.parse::<u16>().map_err(|_| {
-			WrappedErr(
-				format!(
-					"Your terminal said its width is {w}, but that is not a 16-bit unsigned integer"
-				)
-				.into()
-			)
-		})?;
+		window_size.width = w;
+		window_size.height = h;
 	}
 
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,
@@ -247,6 +189,8 @@ async fn main() -> Result<(), WrappedErr> {
 			white
 		)
 	});
+
+	let font_size = picker.font_size();
 
 	let mut ev_stream = crossterm::event::EventStream::new();
 
@@ -326,7 +270,8 @@ async fn main() -> Result<(), WrappedErr> {
 		fullscreen,
 		tui,
 		&mut term,
-		main_area
+		main_area,
+		font_size
 	)
 	.await
 	.map_err(|e| {
@@ -362,7 +307,8 @@ async fn enter_redraw_loop(
 	mut fullscreen: bool,
 	mut tui: Tui,
 	term: &mut Terminal<CrosstermBackend<Stdout>>,
-	mut main_area: tdf::tui::RenderLayout
+	mut main_area: tdf::tui::RenderLayout,
+	font_size: FontSize
 ) -> Result<(), Box<dyn Error>> {
 	loop {
 		let mut needs_redraw = true;
@@ -424,7 +370,7 @@ async fn enter_redraw_loop(
 		if needs_redraw {
 			let mut to_display = KittyDisplay::NoChange;
 			term.draw(|f| {
-				to_display = tui.render(f, &main_area);
+				to_display = tui.render(f, &main_area, font_size);
 			})?;
 
 			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
@@ -498,4 +444,67 @@ fn parse_color_to_i32(cs: &str) -> Result<i32, csscolorparser::ParseColorError> 
 	let color = csscolorparser::parse(cs)?;
 	let [r, g, b, _] = color.to_rgba8();
 	Ok(i32::from_be_bytes([0, r, g, b]))
+}
+
+fn get_font_size_through_stdio() -> Result<(u16, u16), WrappedErr> {
+	// we need to enable raw mode here since this bit of output won't print a newline; it'll
+	// just print the info it wants to tell us. So we want to get all characters as they come
+	enable_raw_mode().map_err(|e| {
+		WrappedErr(
+			format!("Can't enable raw mode, which is necessary to receive input: {e}").into()
+		)
+	})?;
+
+	// read in the returned size until we hit a 't' (which indicates to us it's done)
+	let input_vec = BufReader::new(std::io::stdin())
+		.bytes()
+		.filter_map(Result::ok)
+		.take_while(|b| *b != b't')
+		.collect::<Vec<_>>();
+
+	// and then disable raw mode again in case we return an error in this next section
+	disable_raw_mode().map_err(|e| {
+		WrappedErr(format!("Can't put the terminal back into a normal input state: {e}").into())
+	})?;
+
+	let input_line = String::from_utf8(input_vec).map_err(|e| {
+		WrappedErr(
+			format!(
+				"The terminal responded to our request for its font size by providing non-utf8 data: {e}"
+			)
+			.into()
+		)
+	})?;
+	let input_line = input_line
+		.trim_start_matches("\x1b[4")
+		.trim_start_matches(';');
+
+	// it should input it to us as `\e[4;<height>;<width>t`, so we need to split to get the h/w
+	// ignore the first val
+	let mut splits = input_line.split([';', 't']);
+
+	let (Some(h), Some(w)) = (splits.next(), splits.next()) else {
+		return Err(WrappedErr(
+			format!("Terminal responded with unparseable size response '{input_line}'").into()
+		));
+	};
+
+	let h = h.parse::<u16>().map_err(|_| {
+		WrappedErr(
+			format!(
+				"Your terminal said its height is {h}, but that is not a 16-bit unsigned integer"
+			)
+			.into()
+		)
+	})?;
+	let w = w.parse::<u16>().map_err(|_| {
+		WrappedErr(
+			format!(
+				"Your terminal said its width is {w}, but that is not a 16-bit unsigned integer"
+			)
+			.into()
+		)
+	})?;
+
+	Ok((w, h))
 }

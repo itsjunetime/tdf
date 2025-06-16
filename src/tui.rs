@@ -24,6 +24,7 @@ use ratatui::{
 use ratatui_image::{FontSize, Image};
 
 use crate::{
+	FitOrFill,
 	converter::{ConvertedImage, MaybeTransferred},
 	kitty::{KittyDisplay, KittyReadyToDisplay},
 	renderer::{RenderError, fill_default},
@@ -32,7 +33,7 @@ use crate::{
 
 pub struct Tui {
 	name: String,
-	page: usize,
+	pub page: usize,
 	last_render: LastRender,
 	bottom_msg: BottomMessage,
 	// we use `prev_msg` to, for example, restore the 'search results' message on the bottom after
@@ -73,7 +74,7 @@ struct PageConstraints {
 	r_to_l: bool
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Zoom {
 	// just how much 'zoom' you have. Doesn't relate to anything specific yet, except that 0 means
 	// it fills the screen (instead of fits)
@@ -89,7 +90,7 @@ struct Zoom {
 // This seems like a kinda weird struct because it holds two optionals but any representation
 // within it is valid; I think it's the best way to represent it
 #[derive(Default)]
-struct RenderedInfo {
+pub struct RenderedInfo {
 	// The image, if it has been rendered by `Converter` to that struct
 	img: Option<ConvertedImage>,
 	// The number of results for the current search term that have been found on this page. None if
@@ -179,7 +180,7 @@ impl Tui {
 			frame.render_widget(Skip::new(true), img_area);
 			KittyDisplay::NoChange
 		} else {
-			if let Some(ref zoom) = self.zoom {
+			if let Some(ref mut zoom) = self.zoom {
 				// yes this is ugly and I hate it. it's due to the limitations that currently exist
 				// in the borrow checker. Once `-Zpolonius=next` is stabilized, we can rework this
 				// to look like what we expect.
@@ -191,27 +192,46 @@ impl Tui {
 					.as_ref()
 					.is_some_and(|c| matches!(c, ConvertedImage::Kitty { .. }))
 				{
-					log::debug!("we're inside, it's kitty");
 					let Some(ConvertedImage::Kitty { ref mut img, area }) =
 						self.rendered[self.page].img
 					else {
 						unreachable!()
 					};
 
-					let img_width = f32::from(area.width);
-					let img_height = f32::from(area.height);
-					let available_to_real_width_ratio = f32::from(img_area.width) / img_width;
-					let available_to_real_height_ratio = f32::from(img_area.height) / img_height;
+					// Ugh I don't like this logic. I wish we could simplify it.
+					let (cell_width, cell_height) = if area.width >= img_area.width
+						&& area.height >= img_area.height
+					{
+						(f32::from(img_area.width), f32::from(img_area.height))
+					} else {
+						let img_width = f32::from(area.width);
+						let img_height = f32::from(area.height);
+						let available_to_real_width_ratio = f32::from(img_area.width) / img_width;
+						let available_to_real_height_ratio =
+							f32::from(img_area.height) / img_height;
 
-					let (width, height) =
 						if available_to_real_width_ratio > available_to_real_height_ratio {
 							(img_width, img_height / available_to_real_width_ratio)
 						} else {
 							(img_width / available_to_real_height_ratio, img_height)
-						};
+						}
+					};
 
-					let width = (width * f32::from(font_size.0)) as u32;
-					let height = (height * f32::from(font_size.1)) as u32;
+					let width = (cell_width * f32::from(font_size.0)) as u32;
+					let height = (cell_height * f32::from(font_size.1)) as u32;
+
+					self.last_render = LastRender {
+						rect: size,
+						pages_shown: 1,
+						unused_width: 0
+					};
+
+					zoom.cell_pan_from_left = zoom
+						.cell_pan_from_left
+						.min(area.width.saturating_sub(cell_width as u16));
+					zoom.cell_pan_from_top = zoom
+						.cell_pan_from_top
+						.min(area.height.saturating_sub(cell_height as u16));
 
 					return KittyDisplay::DisplayImages(vec![KittyReadyToDisplay {
 						img,
@@ -314,7 +334,7 @@ impl Tui {
 				frame.render_widget(Image::new(page_img), img_area);
 				None
 			}
-			ConvertedImage::Kitty { img, area } => Some((img, Position {
+			ConvertedImage::Kitty { img, area: _ } => Some((img, Position {
 				x: img_area.x,
 				y: img_area.y
 			}))
@@ -609,12 +629,13 @@ impl Tui {
 								Some(InputAction::Redraw)
 							}
 							'z' => {
-								self.zoom = match self.zoom {
-									None => Some(Zoom::default()),
-									Some(_) => None
+								let (zoom, f_or_f) = match self.zoom {
+									None => (Some(Zoom::default()), FitOrFill::Fill),
+									Some(_) => (None, FitOrFill::Fit)
 								};
+								self.zoom = zoom;
 								self.last_render.rect = Rect::default();
-								Some(InputAction::Redraw)
+								Some(InputAction::SwitchRenderZoom(f_or_f))
 							}
 							'L' => {
 								if let Some(z) = &mut self.zoom {
@@ -853,7 +874,8 @@ pub enum InputAction {
 	Search(String),
 	QuitApp,
 	Invert,
-	Fullscreen
+	Fullscreen,
+	SwitchRenderZoom(crate::FitOrFill)
 }
 
 #[derive(Copy, Clone)]

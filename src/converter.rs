@@ -1,4 +1,7 @@
-use std::num::{NonZeroU32, NonZeroUsize};
+use std::{
+	num::{NonZeroU32, NonZeroUsize},
+	time::{SystemTime, UNIX_EPOCH}
+};
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt;
@@ -127,10 +130,15 @@ pub async fn run_conversion_loop(
 					picker.font_size()
 				);
 
+				let rn = SystemTime::now()
+					.duration_since(UNIX_EPOCH)
+					.unwrap_or_default()
+					.as_nanos();
+
 				let mut img = if shms_work {
 					kittage::image::Image::shm_from(
 						dyn_img,
-						&format!("__tdf_kittage_{pid}_page_{page_num}")
+						&format!("__tdf_kittage_{pid}_page_{rn}_{page_num}")
 					)
 					.map_err(|e| RenderError::Converting(format!("Couldn't write to shm: {e}")))?
 				} else {

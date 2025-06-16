@@ -6,13 +6,17 @@ use mupdf::{
 };
 use ratatui::layout::Rect;
 
-use crate::{PrerenderLimit, skip::InterleavedAroundWithMax};
+use crate::{
+	FitOrFill, PrerenderLimit, ScaledResult, scale_img_for_area, skip::InterleavedAroundWithMax
+};
 
+#[derive(Debug)]
 pub enum RenderNotif {
 	Area(Rect),
 	JumpToPage(usize),
 	PageNeedsReRender(usize),
 	Search(String),
+	SwitchFitOrFill(FitOrFill),
 	Reload,
 	Invert
 }
@@ -93,6 +97,7 @@ pub fn start_rendering(
 	let mut stored_doc = None;
 	let mut invert = false;
 	let mut preserved_area = None;
+	let mut fit_or_fill = FitOrFill::Fit;
 
 	let mut need_rerender = VecDeque::new();
 
@@ -192,6 +197,12 @@ pub fn start_rendering(
 							fill_default(&mut rendered, n_pages.get());
 							continue 'render_pages;
 						}
+						RenderNotif::SwitchFitOrFill(f_or_f) =>
+							if f_or_f != fit_or_fill {
+								fit_or_fill = f_or_f;
+								fill_default(&mut rendered, n_pages.get());
+								continue 'render_pages;
+							},
 						RenderNotif::JumpToPage(page) => {
 							start_point = page;
 							continue 'render_pages;
@@ -287,6 +298,7 @@ pub fn start_rendering(
 					invert,
 					black,
 					white,
+					fit_or_fill,
 					(area_w, area_h)
 				) {
 					// If that fn returned Some, that means it needed to be re-rendered for some
@@ -406,7 +418,7 @@ pub fn start_rendering(
 			// So now we've just *searched* all the pages but not necessarily rendered all of them.
 			// So if there are any we have yet to render, we need to loop back to the beginning of
 			// this loop to continue rendering all of them
-			if rendered.iter().any(|r| !r.successful) {
+			if rendered.iter().any(|r| !r.successful) && prerender == PrerenderLimit::All {
 				continue;
 			}
 
@@ -430,6 +442,7 @@ struct RenderedContext {
 	result_rects: Vec<HighlightRect>
 }
 
+#[expect(clippy::too_many_arguments)]
 fn render_single_page_to_ctx(
 	page: &Page,
 	search_term: Option<&str>,
@@ -437,6 +450,7 @@ fn render_single_page_to_ctx(
 	invert: bool,
 	black: i32,
 	white: i32,
+	fit_or_fill: FitOrFill,
 	(area_w, area_h): (f32, f32)
 ) -> Result<RenderedContext, mupdf::error::Error> {
 	let result_rects = match prev_render.num_search_found {
@@ -447,30 +461,14 @@ fn render_single_page_to_ctx(
 
 	// then, get the size of the page
 	let bounds = page.bounds()?;
-	let (p_width, p_height) = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+	let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
 
-	// and get its aspect ratio
-	let p_aspect_ratio = p_width / p_height;
-
-	// Then we get the full pixel dimensions of the area provided to us, and the aspect ratio
-	// of that area
-	let area_aspect_ratio = area_w / area_h;
-
-	// and get the ratio that this page would have to be scaled by to fit perfectly within the
-	// area provided to us.
-	// we do this first by comparing the aspec ratio of the page with the aspect ratio of the
-	// area to fit it within. If the aspect ratio of the page is larger, then we need to scale
-	// the width of the page to fill perfectly within the height of the area. Otherwise, we
-	// scale the height to fit perfectly. The dimension that _is not_ scaled to fit perfectly
-	// is scaled by the same factor as the dimension that _is_ scaled perfectly.
-	let scale_factor = if p_aspect_ratio > area_aspect_ratio {
-		area_w / p_width
-	} else {
-		area_h / p_height
-	};
-
-	let surface_w = p_width * scale_factor;
-	let surface_h = p_height * scale_factor;
+	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
+	let ScaledResult {
+		width: surface_w,
+		height: surface_h,
+		scale_factor
+	} = scaled;
 
 	let colorspace = Colorspace::device_rgb();
 	let matrix = Matrix::new_scale(scale_factor, scale_factor);

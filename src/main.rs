@@ -331,6 +331,9 @@ async fn enter_redraw_loop(
 						InputAction::Search(term) => to_renderer.send(RenderNotif::Search(term))?,
 						InputAction::Invert => to_renderer.send(RenderNotif::Invert)?,
 						InputAction::Fullscreen => fullscreen = !fullscreen,
+						InputAction::SwitchRenderZoom(f_or_f) => {
+							to_renderer.send(RenderNotif::SwitchFitOrFill(f_or_f)).unwrap();
+						}
 					}
 				}
 			},
@@ -354,7 +357,12 @@ async fn enter_redraw_loop(
 			}
 			Some(img_res) = from_converter.next() => {
 				match img_res {
-					Ok(ConvertedPage { page, num, num_results }) => tui.page_ready(page, num, num_results),
+					Ok(ConvertedPage { page, num, num_results }) => {
+						tui.page_ready(page, num, num_results);
+						if num == tui.page {
+							needs_redraw = true;
+						}
+					},
 					Err(e) => tui.show_error(e),
 				}
 			},

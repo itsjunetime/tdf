@@ -172,8 +172,6 @@ pub async fn display_kitty_images<'es>(
 
 				match res {
 					Ok(img_id) => {
-						// TODO: Re-add this or at least make sure this sort of thing does happen
-						// fake_image.unlink_if_shm();
 						*img = MaybeTransferred::Transferred(img_id);
 						Ok(())
 					}

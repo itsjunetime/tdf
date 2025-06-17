@@ -428,31 +428,24 @@ impl Tui {
 		frame: &mut Frame<'_>,
 		bottom_msg: &BottomMessage
 	) {
+		// use the extra space here to add some padding to the right side
+		let page_nums_text = format!("{} / {} ", page_num + 1, rendered.len());
+
 		let top_block = Block::new()
+			// use this first title to add a bit of padding to the left side
+			.title_top(" ")
+			.title_top(Span::styled(doc_name, Style::new().fg(Color::Cyan)))
+			.title_top(
+				Span::styled(&page_nums_text, Style::new().fg(Color::Cyan))
+					.into_right_aligned_line()
+			)
 			.padding(Padding {
-				right: 2,
-				left: 2,
+				bottom: 1,
 				..Padding::default()
 			})
 			.borders(Borders::BOTTOM);
 
-		let top_area = top_block.inner(top_area);
-
-		let page_nums_text = format!("{} / {}", page_num + 1, rendered.len());
-
-		let top_layout = Layout::horizontal([
-			Constraint::Fill(1),
-			Constraint::Length(page_nums_text.len() as u16)
-		])
-		.split(top_area);
-
-		let title = Span::styled(doc_name, Style::new().fg(Color::Cyan));
-
-		let page_nums = Span::styled(&page_nums_text, Style::new().fg(Color::Cyan));
-
 		frame.render_widget(top_block, top_area);
-		frame.render_widget(title, top_layout[0]);
-		frame.render_widget(page_nums, top_layout[1]);
 
 		let bottom_block = Block::new()
 			.padding(Padding {

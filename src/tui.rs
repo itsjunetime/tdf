@@ -203,31 +203,35 @@ impl Tui {
 						unreachable!()
 					};
 
+					log::debug!("zoom is now {zoom:#?}");
+					log::debug!("img_area is {img_area:#?}");
+
 					if zoom.level < 0 {
 						img_area = Rect {
-							width: img_area.width.saturating_sub((zoom.level * 2).unsigned_abs()).max(1),
+							width: img_area
+								.width
+								.saturating_sub((zoom.level * 2).unsigned_abs())
+								.max(1),
 							x: img_area.x + (zoom.level.unsigned_abs().min(img_area.width / 2)),
 							..img_area
 						}
 					}
 
-					// Ugh I don't like this logic. I wish we could simplify it.
-					let (new_cell_width, new_cell_height) =
-						if cell_w >= img_area.width && cell_h >= img_area.height {
-							(f32::from(img_area.width), f32::from(img_area.height))
-						} else {
-							let img_width = f32::from(cell_w);
-							let img_height = f32::from(cell_h);
-							let img_area_width = f32::from(img_area.width);
-							let img_area_height = f32::from(img_area.height);
-							let available_to_real_width_ratio = img_area_width / img_width;
-							let available_to_real_height_ratio = img_area_height / img_height;
+					log::debug!("after adjustment, img_area is {img_area:#?}");
 
-							if available_to_real_width_ratio > available_to_real_height_ratio {
-								(img_width, img_area_height / available_to_real_width_ratio)
-							} else {
-								(img_area_width / available_to_real_height_ratio, img_height)
-							}
+					// Ugh I don't like this logic. I wish we could simplify it.
+					let img_width = f32::from(cell_w);
+					let img_height = f32::from(cell_h);
+					let img_area_width = f32::from(img_area.width);
+					let img_area_height = f32::from(img_area.height);
+					let available_to_real_width_ratio = img_area_width / img_width;
+					let available_to_real_height_ratio = img_area_height / img_height;
+
+					let (new_cell_width, new_cell_height) =
+						if available_to_real_width_ratio > available_to_real_height_ratio {
+							(img_width, img_area_height / available_to_real_width_ratio)
+						} else {
+							(img_area_width / available_to_real_height_ratio, img_height)
 						};
 
 					log::debug!("new_cell stuff is {new_cell_width}x{new_cell_height}");
@@ -649,48 +653,27 @@ impl Tui {
 								self.last_render.rect = Rect::default();
 								Some(InputAction::SwitchRenderZoom(f_or_f))
 							}
-							'o' if self.is_kitty => {
+							/*'o' if self.is_kitty => {
 								if let Some(z) = &mut self.zoom {
 									z.level = z.level.saturating_add(1);
 								}
 								self.last_render.rect = Rect::default();
 								Some(InputAction::Redraw)
-							}
-							'O' if self.is_kitty => {
-								if let Some(z) = &mut self.zoom {
-									z.level = z.level.saturating_sub(1);
-								}
-								self.last_render.rect = Rect::default();
-								Some(InputAction::Redraw)
-							}
-							'L' if self.is_kitty => {
-								if let Some(z) = &mut self.zoom {
-									z.cell_pan_from_left = z.cell_pan_from_left.saturating_add(1);
-								}
-								self.last_render.rect = Rect::default();
-								Some(InputAction::Redraw)
-							}
-							'H' if self.is_kitty => {
-								if let Some(z) = &mut self.zoom {
-									z.cell_pan_from_left = z.cell_pan_from_left.saturating_sub(1);
-								}
-								self.last_render.rect = Rect::default();
-								Some(InputAction::Redraw)
-							}
-							'J' if self.is_kitty => {
-								if let Some(z) = &mut self.zoom {
-									z.cell_pan_from_top = z.cell_pan_from_top.saturating_add(1);
-								}
-								self.last_render.rect = Rect::default();
-								Some(InputAction::Redraw)
-							}
-							'K' if self.is_kitty => {
-								if let Some(z) = &mut self.zoom {
-									z.cell_pan_from_top = z.cell_pan_from_top.saturating_sub(1);
-								}
-								self.last_render.rect = Rect::default();
-								Some(InputAction::Redraw)
-							}
+							}*/
+							'O' if self.is_kitty =>
+								self.update_zoom(|z| z.level = z.level.saturating_sub(1)),
+							'L' if self.is_kitty => self.update_zoom(|z| {
+								z.cell_pan_from_left = z.cell_pan_from_left.saturating_add(1)
+							}),
+							'H' if self.is_kitty => self.update_zoom(|z| {
+								z.cell_pan_from_left = z.cell_pan_from_left.saturating_sub(1)
+							}),
+							'J' if self.is_kitty => self.update_zoom(|z| {
+								z.cell_pan_from_top = z.cell_pan_from_top.saturating_add(1)
+							}),
+							'K' if self.is_kitty => self.update_zoom(|z| {
+								z.cell_pan_from_top = z.cell_pan_from_top.saturating_sub(1)
+							}),
 							_ => None
 						}
 					}
@@ -788,6 +771,16 @@ impl Tui {
 			Event::Resize(_, _) => Some(InputAction::Redraw),
 			_ => None
 		}
+	}
+
+	// I want this to always return 0 'cause I just use it to return from `Self::handle_event`]
+	#[expect(clippy::unnecessary_wraps)]
+	fn update_zoom(&mut self, f: impl FnOnce(&mut Zoom)) -> Option<InputAction> {
+		if let Some(z) = &mut self.zoom {
+			f(z)
+		}
+		self.last_render.rect = Rect::default();
+		Some(InputAction::Redraw)
 	}
 
 	pub fn show_error(&mut self, err: RenderError) {

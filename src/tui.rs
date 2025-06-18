@@ -42,6 +42,7 @@ pub struct Tui {
 	rendered: Vec<RenderedInfo>,
 	page_constraints: PageConstraints,
 	showing_help_msg: bool,
+	is_kitty: bool,
 	zoom: Option<Zoom>
 }
 
@@ -107,7 +108,7 @@ pub struct RenderLayout {
 }
 
 impl Tui {
-	pub fn new(name: String, max_wide: Option<NonZeroUsize>, r_to_l: bool) -> Tui {
+	pub fn new(name: String, max_wide: Option<NonZeroUsize>, r_to_l: bool, is_kitty: bool) -> Tui {
 		Self {
 			name,
 			page: 0,
@@ -117,6 +118,7 @@ impl Tui {
 			rendered: vec![],
 			page_constraints: PageConstraints { max_wide, r_to_l },
 			showing_help_msg: false,
+			is_kitty,
 			zoom: None
 		}
 	}
@@ -621,7 +623,7 @@ impl Tui {
 								self.last_render.rect = Rect::default();
 								Some(InputAction::Redraw)
 							}
-							'z' => {
+							'z' if self.is_kitty => {
 								let (zoom, f_or_f) = match self.zoom {
 									None => (Some(Zoom::default()), FitOrFill::Fill),
 									Some(_) => (None, FitOrFill::Fit)
@@ -630,28 +632,28 @@ impl Tui {
 								self.last_render.rect = Rect::default();
 								Some(InputAction::SwitchRenderZoom(f_or_f))
 							}
-							'L' => {
+							'L' if self.is_kitty => {
 								if let Some(z) = &mut self.zoom {
 									z.cell_pan_from_left = z.cell_pan_from_left.saturating_add(1);
 								}
 								self.last_render.rect = Rect::default();
 								Some(InputAction::Redraw)
 							}
-							'H' => {
+							'H' if self.is_kitty => {
 								if let Some(z) = &mut self.zoom {
 									z.cell_pan_from_left = z.cell_pan_from_left.saturating_sub(1);
 								}
 								self.last_render.rect = Rect::default();
 								Some(InputAction::Redraw)
 							}
-							'J' => {
+							'J' if self.is_kitty => {
 								if let Some(z) = &mut self.zoom {
 									z.cell_pan_from_top = z.cell_pan_from_top.saturating_add(1);
 								}
 								self.last_render.rect = Rect::default();
 								Some(InputAction::Redraw)
 							}
-							'K' => {
+							'K' if self.is_kitty => {
 								if let Some(z) = &mut self.zoom {
 									z.cell_pan_from_top = z.cell_pan_from_top.saturating_sub(1);
 								}

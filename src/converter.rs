@@ -20,6 +20,7 @@ use crate::{
 	skip::InterleavedAroundWithMax
 };
 
+#[derive(Debug)]
 pub enum MaybeTransferred {
 	NotYet(kittage::image::Image<'static>),
 	Transferred(kittage::ImageId)

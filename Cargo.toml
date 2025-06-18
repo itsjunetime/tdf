@@ -40,8 +40,8 @@ mimalloc = "0.1.43"
 nix = { version = "0.30.0", features = ["signal"] }
 mupdf = { version = "0.5.0", default-features = false, features = ["svg", "system-fonts", "img"] }
 rayon = { version = "*", default-features = false }
-# kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate"] }
-kittage = { git = "https://github.com/itsjunetime/kittage.git", features = ["crossterm-tokio", "image-crate"] }
+# kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
+kittage = { git = "https://github.com/itsjunetime/kittage.git", features = ["crossterm-tokio", "image-crate", "log"] }
 memmap2 = "*"
 
 # logging

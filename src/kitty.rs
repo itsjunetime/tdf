@@ -11,7 +11,7 @@ use kittage::{
 	AsyncInputReader, ImageDimensions, ImageId, NumberOrId, PixelFormat,
 	action::Action,
 	delete::{ClearOrDelete, DeleteConfig, WhichToDelete},
-	display::{DisplayConfig, DisplayLocation},
+	display::{CursorMovementPolicy, DisplayConfig, DisplayLocation},
 	error::TransmitError,
 	image::Image,
 	medium::Medium
@@ -137,10 +137,14 @@ pub async fn display_kitty_images<'es>(
 	{
 		let config = DisplayConfig {
 			location: display_loc,
+			cursor_movement: CursorMovementPolicy::DontMove,
 			..DisplayConfig::default()
 		};
 
 		execute!(std::io::stdout(), MoveTo(pos.x, pos.y)).unwrap();
+
+		log::debug!("going to display img {img:#?}");
+		log::debug!("displaying with config {config:#?}");
 
 		let this_err = match img {
 			MaybeTransferred::NotYet(image) => {
@@ -190,6 +194,8 @@ pub async fn display_kitty_images<'es>(
 			.map(|_| ())
 			.map_err(|e| (page_num, e))
 		};
+
+		log::debug!("this_err is {this_err:#?}");
 
 		if let Err((id, e)) = this_err {
 			let e = err.get_or_insert_with(|| (vec![], e));

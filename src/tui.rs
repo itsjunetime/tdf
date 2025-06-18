@@ -79,7 +79,7 @@ struct PageConstraints {
 struct Zoom {
 	// just how much 'zoom' you have. Doesn't relate to anything specific yet, except that 0 means
 	// it fills the screen (instead of fits)
-	level: u16,
+	level: i16,
 	// how many terminal-cells worth of content overflow the left side of the screen (and are thus
 	// not displayed)
 	cell_pan_from_left: u16,
@@ -194,33 +194,46 @@ impl Tui {
 					.as_ref()
 					.is_some_and(|c| matches!(c, ConvertedImage::Kitty { .. }))
 				{
-					let Some(ConvertedImage::Kitty { ref mut img, area }) =
-						self.rendered[self.page].img
+					let Some(ConvertedImage::Kitty {
+						ref mut img,
+						cell_w,
+						cell_h
+					}) = self.rendered[self.page].img
 					else {
 						unreachable!()
 					};
 
-					// Ugh I don't like this logic. I wish we could simplify it.
-					let (cell_width, cell_height) = if area.width >= img_area.width
-						&& area.height >= img_area.height
-					{
-						(f32::from(img_area.width), f32::from(img_area.height))
-					} else {
-						let img_width = f32::from(area.width);
-						let img_height = f32::from(area.height);
-						let available_to_real_width_ratio = f32::from(img_area.width) / img_width;
-						let available_to_real_height_ratio =
-							f32::from(img_area.height) / img_height;
-
-						if available_to_real_width_ratio > available_to_real_height_ratio {
-							(img_width, img_height / available_to_real_width_ratio)
-						} else {
-							(img_width / available_to_real_height_ratio, img_height)
+					if zoom.level < 0 {
+						img_area = Rect {
+							width: img_area.width.saturating_sub((zoom.level * 2).unsigned_abs()).max(1),
+							x: img_area.x + (zoom.level.unsigned_abs().min(img_area.width / 2)),
+							..img_area
 						}
-					};
+					}
 
-					let width = (cell_width * f32::from(font_size.0)) as u32;
-					let height = (cell_height * f32::from(font_size.1)) as u32;
+					// Ugh I don't like this logic. I wish we could simplify it.
+					let (new_cell_width, new_cell_height) =
+						if cell_w >= img_area.width && cell_h >= img_area.height {
+							(f32::from(img_area.width), f32::from(img_area.height))
+						} else {
+							let img_width = f32::from(cell_w);
+							let img_height = f32::from(cell_h);
+							let img_area_width = f32::from(img_area.width);
+							let img_area_height = f32::from(img_area.height);
+							let available_to_real_width_ratio = img_area_width / img_width;
+							let available_to_real_height_ratio = img_area_height / img_height;
+
+							if available_to_real_width_ratio > available_to_real_height_ratio {
+								(img_width, img_area_height / available_to_real_width_ratio)
+							} else {
+								(img_area_width / available_to_real_height_ratio, img_height)
+							}
+						};
+
+					log::debug!("new_cell stuff is {new_cell_width}x{new_cell_height}");
+
+					let width = (new_cell_width * f32::from(font_size.0)) as u32;
+					let height = (new_cell_height * f32::from(font_size.1)) as u32;
 
 					self.last_render = LastRender {
 						rect: size,
@@ -230,10 +243,10 @@ impl Tui {
 
 					zoom.cell_pan_from_left = zoom
 						.cell_pan_from_left
-						.min(area.width.saturating_sub(cell_width as u16));
+						.min(cell_w.saturating_sub(new_cell_width as u16));
 					zoom.cell_pan_from_top = zoom
 						.cell_pan_from_top
-						.min(area.height.saturating_sub(cell_height as u16));
+						.min(cell_h.saturating_sub(new_cell_height as u16));
 
 					return KittyDisplay::DisplayImages(vec![KittyReadyToDisplay {
 						img,
@@ -271,7 +284,7 @@ impl Tui {
 					take
 				})
 				// and map it to their width (in cells on the terminal, not pixels)
-				.filter_map(|(_, page)| page.img.as_mut().map(|img| (img.area().width, img)))
+				.filter_map(|(_, page)| page.img.as_mut().map(|img| (img.w_h().0, img)))
 				// and then take them as long as they won't overflow the available area.
 				.take_while(|(width, _)| match test_area_w.checked_sub(*width) {
 					Some(new_val) => {
@@ -336,7 +349,11 @@ impl Tui {
 				frame.render_widget(Image::new(page_img), img_area);
 				None
 			}
-			ConvertedImage::Kitty { img, area: _ } => Some((img, Position {
+			ConvertedImage::Kitty {
+				img,
+				cell_h: _,
+				cell_w: _
+			} => Some((img, Position {
 				x: img_area.x,
 				y: img_area.y
 			}))
@@ -396,7 +413,7 @@ impl Tui {
 		if page_num >= self.page && page_num <= self.page + self.last_render.pages_shown {
 			self.last_render.rect = Rect::default();
 		} else {
-			let img_w = img.area().width;
+			let img_w = img.w_h().0;
 			if img_w <= self.last_render.unused_width {
 				let num_fit = self.last_render.unused_width / img_w;
 				if page_num >= self.page && (self.page + num_fit as usize) >= page_num {
@@ -631,6 +648,20 @@ impl Tui {
 								self.zoom = zoom;
 								self.last_render.rect = Rect::default();
 								Some(InputAction::SwitchRenderZoom(f_or_f))
+							}
+							'o' if self.is_kitty => {
+								if let Some(z) = &mut self.zoom {
+									z.level = z.level.saturating_add(1);
+								}
+								self.last_render.rect = Rect::default();
+								Some(InputAction::Redraw)
+							}
+							'O' if self.is_kitty => {
+								if let Some(z) = &mut self.zoom {
+									z.level = z.level.saturating_sub(1);
+								}
+								self.last_render.rect = Rect::default();
+								Some(InputAction::Redraw)
 							}
 							'L' if self.is_kitty => {
 								if let Some(z) = &mut self.zoom {

@@ -10,6 +10,8 @@ use crate::{
 	FitOrFill, PrerenderLimit, ScaledResult, scale_img_for_area, skip::InterleavedAroundWithMax
 };
 
+const KITTY_MAX_W_OR_H: f32 = 10_000.0;
+
 #[derive(Debug)]
 pub enum RenderNotif {
 	Area(Rect),
@@ -313,6 +315,8 @@ pub fn start_rendering(
 							continue;
 						};
 
+						log::debug!("got pixmap for page {page_num} with WxH {w}x{h}");
+
 						rendered.num_search_found = Some(ctx.result_rects.len());
 						rendered.successful = true;
 
@@ -465,10 +469,17 @@ fn render_single_page_to_ctx(
 
 	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
 	let ScaledResult {
-		width: surface_w,
-		height: surface_h,
-		scale_factor
+		width: mut surface_w,
+		height: mut surface_h,
+		mut scale_factor
 	} = scaled;
+
+	if surface_w > KITTY_MAX_W_OR_H || surface_h > KITTY_MAX_W_OR_H {
+		let descale = (surface_w / KITTY_MAX_W_OR_H).max(surface_h / KITTY_MAX_W_OR_H);
+		surface_w /= descale;
+		surface_h /= descale;
+		scale_factor /= descale;
+	}
 
 	let colorspace = Colorspace::device_rgb();
 	let matrix = Matrix::new_scale(scale_factor, scale_factor);

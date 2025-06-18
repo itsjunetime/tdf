@@ -28,14 +28,25 @@ pub enum MaybeTransferred {
 
 pub enum ConvertedImage {
 	Generic(Protocol),
-	Kitty { img: MaybeTransferred, area: Rect }
+	Kitty {
+		img: MaybeTransferred,
+		cell_w: u16,
+		cell_h: u16
+	}
 }
 
 impl ConvertedImage {
-	pub fn area(&self) -> Rect {
+	pub fn w_h(&self) -> (u16, u16) {
 		match self {
-			Self::Generic(prot) => prot.area(),
-			Self::Kitty { img: _, area } => *area
+			Self::Generic(prot) => {
+				let a = prot.area();
+				(a.width, a.height)
+			}
+			Self::Kitty {
+				img: _,
+				cell_w,
+				cell_h
+			} => (*cell_w, *cell_h)
 		}
 	}
 }
@@ -125,12 +136,6 @@ pub async fn run_conversion_loop(
 
 		let txt_img = match picker.protocol_type() {
 			ProtocolType::Kitty => {
-				let area = ratatui_image::protocol::ImageSource::round_pixel_size_to_cells(
-					dyn_img.width(),
-					dyn_img.height(),
-					picker.font_size()
-				);
-
 				let rn = SystemTime::now()
 					.duration_since(UNIX_EPOCH)
 					.unwrap_or_default()
@@ -149,7 +154,8 @@ pub async fn run_conversion_loop(
 				img.num_or_id = NumberOrId::Id(NonZeroU32::new(page_num as u32 + 1).unwrap());
 				ConvertedImage::Kitty {
 					img: MaybeTransferred::NotYet(img),
-					area
+					cell_w: page_info.img_data.cell_w,
+					cell_h: page_info.img_data.cell_h
 				}
 			}
 			_ => ConvertedImage::Generic(

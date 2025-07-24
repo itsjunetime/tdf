@@ -19,7 +19,7 @@ Designed to be performant, very responsive, and work well with even very large P
 2. Run `rustup install nightly && cargo +nightly install --git https://github.com/itsjunetime/tdf.git`
 
 ## To Build
-First, you need to install the system dependencies. This will generally only include `libfontconfig`. If you're on linux, these will probably show up in your package manager as something like `libfontconfig1-devel` or `libfontconfig-dev`.
+First, you need to install the system dependencies. This will generally only include `libfontconfig` and `clang`. If you're on linux, these will probably show up in your package manager as something like `libfontconfig1-devel` or `libfontconfig-dev` and just `clang`.
 
 If it turns out that you're missing one of these, it will fail to compile and tell you what library you're missing. Find the development package for that library in your package manager, install it, and try to build again. Now, the important steps:
 

@@ -1,17 +1,21 @@
+use core::error::Error;
 use std::{
+	borrow::Cow,
 	ffi::OsString,
-	io::{BufReader, Read, Write, stdout},
+	io::{BufReader, Read, Stdout, Write, stdout},
 	num::NonZeroUsize,
 	path::PathBuf
 };
 
 use crossterm::{
+	event::EventStream,
 	execute,
 	terminal::{
 		EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
 		enable_raw_mode, window_size
 	}
 };
+use flume::{Sender, r#async::RecvStream};
 use futures_util::{FutureExt, stream::StreamExt};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -24,19 +28,24 @@ use tdf::{
 };
 
 // Dummy struct for easy errors in main
-#[derive(Debug)]
-struct BadTermSizeStdin(String);
+struct WrappedErr(Cow<'static, str>);
 
-impl std::fmt::Display for BadTermSizeStdin {
+impl std::fmt::Display for WrappedErr {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{}", self.0)
 	}
 }
 
-impl std::error::Error for BadTermSizeStdin {}
+impl std::fmt::Debug for WrappedErr {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		std::fmt::Display::fmt(self, f)
+	}
+}
+
+impl std::error::Error for WrappedErr {}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), WrappedErr> {
 	#[cfg(feature = "tracing")]
 	console_subscriber::init();
 
@@ -59,18 +68,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		required file: PathBuf
 	};
 
-	let path = flags.file.canonicalize()?;
-	let black = parse_color_to_i32(&flags.black_color.unwrap_or("000000".into())).map_err(|e| {
-		BadTermSizeStdin(format!(
-			"Couldn't parse black color: {e} - is it formatted like a CSS color?"
-		))
-	})?;
+	let path = flags
+		.file
+		.canonicalize()
+		.map_err(|e| WrappedErr(format!("Cannot canonicalize provided file: {e}").into()))?;
 
-	let white = parse_color_to_i32(&flags.white_color.unwrap_or("FFFFFF".into())).map_err(|e| {
-		BadTermSizeStdin(format!(
-			"Couldn't parse while color: {e} - is it formatted like a CSS color?"
-		))
-	})?;
+	let black =
+		parse_color_to_i32(flags.black_color.as_deref().unwrap_or("000000")).map_err(|e| {
+			WrappedErr(
+				format!("Couldn't parse black color: {e} - is it formatted like a CSS color?")
+					.into()
+			)
+		})?;
+
+	let white =
+		parse_color_to_i32(flags.white_color.as_deref().unwrap_or("FFFFFF")).map_err(|e| {
+			WrappedErr(
+				format!("Couldn't parse white color: {e} - is it formatted like a CSS color?")
+					.into()
+			)
+		})?;
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
 	let tui_tx = watch_to_render_tx.clone();
@@ -82,9 +99,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		watch_to_tui_tx,
 		watch_to_render_tx,
 		path.file_name()
-			.ok_or("Path does not have a last component??")?
+			.ok_or(WrappedErr("Path does not have a last component??".into()))?
 			.to_owned()
-	))?;
+	))
+	.map_err(|e| WrappedErr(format!("Couldn't start watching the provided file: {e}").into()))?;
 
 	// So we have to watch the parent directory of the file that we are interested in because the
 	// `notify` library works on inodes, and if the file is deleted, that inode is gone as well,
@@ -94,25 +112,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// opinion on this clear
 	// (https://github.com/notify-rs/notify/issues/113#issuecomment-281836995) so whatever, guess
 	// we have to do this annoying workaround.
-	watcher.watch(
-		path.parent().expect("The root directory is not a PDF"),
-		RecursiveMode::NonRecursive
-	)?;
+	watcher
+		.watch(
+			path.parent().expect("The root directory is not a PDF"),
+			RecursiveMode::NonRecursive
+		)
+		.map_err(|e| WrappedErr(format!("Can't watch the provided file: {e}").into()))?;
 
 	// TODO: Handle non-utf8 file names? Maybe by constructing a CString and passing that in to the
 	// mupdf stuff instead of a rust string?
 	let file_path = path.clone().into_os_string().to_string_lossy().to_string();
 
-	let mut window_size = window_size()?;
+	let mut window_size = window_size().map_err(|e| {
+		WrappedErr(format!("Can't get your current terminal window size: {e}").into())
+	})?;
 
 	if window_size.width == 0 || window_size.height == 0 {
 		// send the command code to get the terminal window size
 		print!("\x1b[14t");
-		std::io::stdout().flush()?;
+		std::io::stdout().flush().unwrap();
 
 		// we need to enable raw mode here since this bit of output won't print a newline; it'll
 		// just print the info it wants to tell us. So we want to get all characters as they come
-		enable_raw_mode()?;
+		enable_raw_mode().map_err(|e| {
+			WrappedErr(
+				format!("Can't enable raw mode, which is necessary to receive input: {e}").into()
+			)
+		})?;
 
 		// read in the returned size until we hit a 't' (which indicates to us it's done)
 		let input_vec = BufReader::new(std::io::stdin())
@@ -122,9 +148,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			.collect::<Vec<_>>();
 
 		// and then disable raw mode again in case we return an error in this next section
-		disable_raw_mode()?;
+		disable_raw_mode().map_err(|e| {
+			WrappedErr(format!("Can't put the terminal back into a normal input state: {e}").into())
+		})?;
 
-		let input_line = String::from_utf8(input_vec)?;
+		let input_line = String::from_utf8(input_vec).map_err(|e| {
+			WrappedErr(
+				format!(
+					"The terminal responded to our request for its font size by providing non-utf8 data: {e}"
+				)
+				.into()
+			)
+		})?;
 		let input_line = input_line
 			.trim_start_matches("\x1b[4")
 			.trim_start_matches(';');
@@ -134,19 +169,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let mut splits = input_line.split([';', 't']);
 
 		let (Some(h), Some(w)) = (splits.next(), splits.next()) else {
-			return Err(BadTermSizeStdin(format!(
-				"Terminal responded with unparseable size response '{input_line}'"
-			))
-			.into());
+			return Err(WrappedErr(
+				format!("Terminal responded with unparseable size response '{input_line}'").into()
+			));
 		};
 
-		window_size.height = h.parse::<u16>()?;
-		window_size.width = w.parse::<u16>()?;
+		window_size.height = h.parse::<u16>().map_err(|_| {
+			WrappedErr(
+				format!(
+					"Your terminal said its height is {h}, but that is not a 16-bit unsigned integer"
+				)
+				.into()
+			)
+		})?;
+		window_size.width = w.parse::<u16>().map_err(|_| {
+			WrappedErr(
+				format!(
+					"Your terminal said its width is {w}, but that is not a 16-bit unsigned integer"
+				)
+				.into()
+			)
+		})?;
 	}
 
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,
 	// it messes up something with user input. Input never makes it to the crossterm thing
-	let picker = Picker::from_query_stdio()?;
+	let picker = Picker::from_query_stdio()
+		.map_err(|e| WrappedErr(match e {
+			ratatui_image::errors::Errors::NoFontSize =>
+				"Unable to detect your terminal's font size; this is an issue with your terminal emulator.\nPlease use a different terminal emulator or report this bug to tdf.".into(),
+			e => format!("Couldn't get the necessary information to set up images: {e}").into()
+		}))?;
 
 	// then we want to spawn off the rendering task
 	// We need to use the thread::spawn API so that this exists in a thread not owned by tokio,
@@ -167,7 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		)
 	});
 
-	let mut ev_stream = crossterm::event::EventStream::new();
+	let ev_stream = crossterm::event::EventStream::new();
 
 	let (to_converter, from_main) = flume::unbounded();
 	let (to_main, from_converter) = flume::unbounded();
@@ -178,26 +231,91 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		|| "Unknown file".into(),
 		|n| n.to_string_lossy().to_string()
 	);
-	let mut tui = Tui::new(file_name, flags.max_wide, flags.r_to_l.unwrap_or_default());
+	let tui = Tui::new(file_name, flags.max_wide, flags.r_to_l.unwrap_or_default());
 
 	let backend = CrosstermBackend::new(std::io::stdout());
-	let mut term = Terminal::new(backend)?;
+	let mut term = Terminal::new(backend).map_err(|e| {
+		WrappedErr(format!("Couldn't set up crossterm's terminal backend: {e}").into())
+	})?;
 	term.skip_diff(true);
 
 	execute!(
 		term.backend_mut(),
 		EnterAlternateScreen,
 		crossterm::cursor::Hide
-	)?;
-	enable_raw_mode()?;
+	)
+	.map_err(|e| {
+		WrappedErr(
+			format!(
+				"Couldn't enter the alternate screen and hide the cursor for proper presentation: {e}"
+			)
+			.into()
+		)
+	})?;
+	enable_raw_mode().map_err(|e| {
+		WrappedErr(
+			format!("Can't enable raw mode, which is necessary to receive input: {e}").into()
+		)
+	})?;
 
-	let mut fullscreen = flags.fullscreen.unwrap_or_default();
-	let mut main_area = Tui::main_layout(&term.get_frame(), fullscreen);
-	tui_tx.send(RenderNotif::Area(main_area.page_area))?;
+	let fullscreen = flags.fullscreen.unwrap_or_default();
+	let main_area = Tui::main_layout(&term.get_frame(), fullscreen);
+	tui_tx
+		.send(RenderNotif::Area(main_area.page_area))
+		.map_err(|e| {
+			WrappedErr(
+				format!("Couldn't inform the rendering thread of the available area: {e}").into()
+			)
+		})?;
 
-	let mut tui_rx = tui_rx.into_stream();
-	let mut from_converter = from_converter.into_stream();
+	let tui_rx = tui_rx.into_stream();
+	let from_converter = from_converter.into_stream();
 
+	enter_redraw_loop(
+		ev_stream,
+		tui_tx,
+		tui_rx,
+		to_converter,
+		from_converter,
+		fullscreen,
+		tui,
+		&mut term,
+		main_area
+	)
+	.await
+	.map_err(|e| {
+		WrappedErr(
+			format!(
+				"An unexpected error occurred while communicating between different parts of tdf: {e}"
+			)
+			.into()
+		)
+	})?;
+
+	execute!(
+		term.backend_mut(),
+		LeaveAlternateScreen,
+		crossterm::cursor::Show
+	)
+	.unwrap();
+	disable_raw_mode().unwrap();
+
+	Ok(())
+}
+
+// oh shut up clippy who cares
+#[expect(clippy::too_many_arguments)]
+async fn enter_redraw_loop(
+	mut ev_stream: EventStream,
+	tui_tx: Sender<RenderNotif>,
+	mut tui_rx: RecvStream<'_, Result<RenderInfo, RenderError>>,
+	to_converter: Sender<ConverterMsg>,
+	mut from_converter: RecvStream<'_, Result<ConvertedPage, RenderError>>,
+	mut fullscreen: bool,
+	mut tui: Tui,
+	term: &mut Terminal<CrosstermBackend<Stdout>>,
+	mut main_area: tdf::tui::RenderLayout
+) -> Result<(), Box<dyn Error>> {
 	loop {
 		let mut needs_redraw = true;
 		tokio::select! {
@@ -210,7 +328,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 					None => needs_redraw = false,
 					Some(action) => match action {
 						InputAction::Redraw => (),
-						InputAction::QuitApp => break,
+						InputAction::QuitApp => return Ok(()),
 						InputAction::JumpingToPage(page) => {
 							tui_tx.send(RenderNotif::JumpToPage(page))?;
 							to_converter.send(ConverterMsg::GoToPage(page))?;
@@ -261,15 +379,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			execute!(stdout(), EndSynchronizedUpdate)?;
 		}
 	}
-
-	execute!(
-		term.backend_mut(),
-		LeaveAlternateScreen,
-		crossterm::cursor::Show
-	)?;
-	disable_raw_mode()?;
-
-	Ok(())
 }
 
 fn on_notify_ev(

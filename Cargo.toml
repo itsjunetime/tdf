@@ -64,7 +64,7 @@ epub = ["mupdf/epub"]
 cbz = ["mupdf/cbz"]
 
 [dev-dependencies]
-criterion = { version = "0.6.0", features = ["async_tokio"] }
+criterion = { version = "0.7.0", features = ["async_tokio"] }
 cpuprofiler = "0.0.4"
 
 [[bench]]

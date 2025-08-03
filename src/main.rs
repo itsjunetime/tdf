@@ -2,7 +2,7 @@ use core::error::Error;
 use std::{
 	borrow::Cow,
 	ffi::OsString,
-	io::{stdout, BufReader, Read, Stdout},
+	io::{BufReader, Read, Stdout, stdout},
 	num::{NonZeroU32, NonZeroUsize},
 	path::PathBuf
 };
@@ -15,8 +15,8 @@ use crossterm::{
 		enable_raw_mode, window_size
 	}
 };
-use flume::{Sender, r#async::RecvStream};
 use flexi_logger::FileSpec;
+use flume::{Sender, r#async::RecvStream};
 use futures_util::{FutureExt, stream::StreamExt};
 use kittage::{
 	action::Action,
@@ -25,7 +25,10 @@ use kittage::{
 };
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use ratatui_image::{picker::{Picker, ProtocolType}, FontSize};
+use ratatui_image::{
+	FontSize,
+	picker::{Picker, ProtocolType}
+};
 use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
@@ -101,16 +104,15 @@ async fn main() -> Result<(), WrappedErr> {
 	let mut maybe_logger = None;
 
 	if std::env::var("RUST_LOG").is_ok() {
-		maybe_logger =
-			Some(
-				flexi_logger::Logger::try_with_env()
-					.map_err(|e| WrappedErr(format!("Couldn't create initial logger: {e}").into()))?
-					.log_to_file(FileSpec::try_from("./debug.log").map_err(|e| {
-						WrappedErr(format!("Couldn't create FileSpec for logger: {e}").into())
-					})?)
-					.start()
-					.map_err(|e| WrappedErr(format!("Can't start logger: {e}").into()))?
-			);
+		maybe_logger = Some(
+			flexi_logger::Logger::try_with_env()
+				.map_err(|e| WrappedErr(format!("Couldn't create initial logger: {e}").into()))?
+				.log_to_file(FileSpec::try_from("./debug.log").map_err(|e| {
+					WrappedErr(format!("Couldn't create FileSpec for logger: {e}").into())
+				})?)
+				.start()
+				.map_err(|e| WrappedErr(format!("Can't start logger: {e}").into()))?
+		);
 	}
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
@@ -250,7 +252,9 @@ async fn main() -> Result<(), WrappedErr> {
 			&mut ev_stream
 		)
 		.await
-		.map_err(|e| WrappedErr(format!("Couldn't delete all previous images from memory: {e}").into()))?;
+		.map_err(|e| {
+			WrappedErr(format!("Couldn't delete all previous images from memory: {e}").into())
+		})?;
 	}
 
 	let fullscreen = flags.fullscreen.unwrap_or_default();

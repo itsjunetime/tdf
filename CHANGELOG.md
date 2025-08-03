@@ -1,7 +1,9 @@
 # Unreleased
 
-- Update ratatui(-image) dependencies
+- Update to new `kittage` backend for kitty-protocol-supporting terminals (fixes many issues and improves performance significantly, see [the PR](https://github.com/itsjunetime/tdf/pull/74))
 - Use new mupdf search API for slightly better performance
+- Update ratatui(-image) dependencies
+- Allow specification of default white and black colors for rendered pdfs
 - Pause rendering every once in a while while there's a search term to enable searching across the entire document more quickly
 - Fix an issue with missing search highlights
 

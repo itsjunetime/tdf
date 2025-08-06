@@ -32,6 +32,8 @@ jobs:
       run: rustup component add clippy rustfmt
     - name: Clippy
       run: cargo clippy -- -D warnings
+    - name: Tests
+      run: cargo test
     - name: Check fmt
       run: cargo fmt -- --check
     - name: Run tests

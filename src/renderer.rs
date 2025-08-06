@@ -1,19 +1,24 @@
-use std::{thread::sleep, time::Duration};
+use std::{collections::VecDeque, num::NonZeroUsize, thread::sleep, time::Duration};
 
-use crossterm::terminal::WindowSize;
 use flume::{Receiver, SendError, Sender, TryRecvError};
-use itertools::Itertools;
 use mupdf::{
 	Colorspace, Document, Matrix, Page, Pixmap, Quad, TextPageOptions, text_page::SearchHitResponse
 };
 use ratatui::layout::Rect;
 
-use crate::PrerenderLimit;
+use crate::{
+	FitOrFill, PrerenderLimit, ScaledResult, scale_img_for_area, skip::InterleavedAroundWithMax
+};
 
+const KITTY_MAX_W_OR_H: f32 = 10_000.0;
+
+#[derive(Debug)]
 pub enum RenderNotif {
 	Area(Rect),
 	JumpToPage(usize),
+	PageNeedsReRender(usize),
 	Search(String),
+	SwitchFitOrFill(FitOrFill),
 	Reload,
 	Invert
 }
@@ -73,12 +78,13 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 // We're allowing passing by value here because this is only called once, at the beginning of the
 // program, and the arguments that 'should' be passed by value (`receiver` and `size`) would
 // probably be more performant if accessed by-value instead of through a reference. Probably.
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub fn start_rendering(
 	path: &str,
 	sender: Sender<Result<RenderInfo, RenderError>>,
 	receiver: Receiver<RenderNotif>,
-	size: WindowSize,
+	col_h: u16,
+	col_w: u16,
 	prerender: PrerenderLimit,
 	black: i32,
 	white: i32
@@ -88,13 +94,14 @@ pub fn start_rendering(
 	let mut search_term = None;
 
 	// And although the font size could theoretically change, we aren't accounting for that right
-	// now, so we just keep this out of the loop.
-	let col_w = size.width / size.columns;
-	let col_h = size.height / size.rows;
+	// now, so we just use the values passed in.
 
 	let mut stored_doc = None;
 	let mut invert = false;
 	let mut preserved_area = None;
+	let mut fit_or_fill = FitOrFill::Fit;
+
+	let mut need_rerender = VecDeque::new();
 
 	'reload: loop {
 		let doc = match Document::open(path) {
@@ -128,7 +135,13 @@ pub fn start_rendering(
 		};
 
 		let n_pages = match doc.page_count() {
-			Ok(n) => n as usize,
+			Ok(n) => match NonZeroUsize::new(n as usize) {
+				Some(n) => n,
+				None => {
+					sleep(Duration::from_secs(1));
+					continue 'reload;
+				}
+			},
 			Err(e) => {
 				sender.send(Err(RenderError::Doc(e)))?;
 				// just basic backoff i think
@@ -137,7 +150,7 @@ pub fn start_rendering(
 			}
 		};
 
-		sender.send(Ok(RenderInfo::NumPages(n_pages)))?;
+		sender.send(Ok(RenderInfo::NumPages(n_pages.get())))?;
 
 		// We're using this vec of bools to indicate which page numbers have already been rendered,
 		// to support people jumping to specific pages and having quick rendering results. We
@@ -145,7 +158,7 @@ pub fn start_rendering(
 		// doing basically nothing, but if we get a notification that something has been jumped to,
 		// then we can split at that page and render at both sides of it
 		let mut rendered = Vec::new();
-		fill_default::<PrevRender>(&mut rendered, n_pages);
+		fill_default::<PrevRender>(&mut rendered, n_pages.get());
 		let mut start_point = 0;
 
 		// This is kinda a weird way of doing this, but if we get a notification that the area
@@ -165,6 +178,9 @@ pub fn start_rendering(
 				new_area
 			});
 
+			let area_w = f32::from(area.width) * f32::from(col_w);
+			let area_h = f32::from(area.height) * f32::from(col_h);
+
 			// what we do with a notif is the same regardless of if we're in the middle of
 			// rendering the list of pages or we're all done
 			macro_rules! handle_notif {
@@ -180,11 +196,22 @@ pub fn start_rendering(
 						}
 						RenderNotif::Area(new_area) => {
 							preserved_area = Some(new_area);
-							fill_default(&mut rendered, n_pages);
+							fill_default(&mut rendered, n_pages.get());
 							continue 'render_pages;
 						}
+						RenderNotif::SwitchFitOrFill(f_or_f) =>
+							if f_or_f != fit_or_fill {
+								fit_or_fill = f_or_f;
+								fill_default(&mut rendered, n_pages.get());
+								continue 'render_pages;
+							},
 						RenderNotif::JumpToPage(page) => {
 							start_point = page;
+							continue 'render_pages;
+						}
+						RenderNotif::PageNeedsReRender(page) => {
+							rendered[page].successful = false;
+							need_rerender.push_back(page);
 							continue 'render_pages;
 						}
 						RenderNotif::Search(term) => {
@@ -216,28 +243,21 @@ pub fn start_rendering(
 			}
 
 			let any_not_searched = rendered.iter().any(|r| r.num_search_found.is_none());
-			let (left, right) = rendered.split_at_mut(start_point);
 
 			// This is our iterator over all the pages we want to look at and render. It uses this
 			// weird 'interleave' thing to render pages on *both sides* of the currently-displayed
 			// page in case they device to go forward or backwards.
-			let page_iter = right
-				.iter_mut()
-				.enumerate()
-				.map(move |(idx, p)| (idx + start_point, p))
-				.interleave(
-					left.iter_mut()
-						.rev()
-						.enumerate()
-						.map(move |(idx, p)| (start_point - (idx + 1), p))
-				)
-				.take(match (&prerender, &search_term) {
+			let page_iter = PopOnNext {
+				inner: &mut need_rerender
+			}
+			.chain(InterleavedAroundWithMax::new(start_point, 0, n_pages).take(
+				match (&prerender, &search_term) {
 					// If the user has limited the amount of pages they want to prerender, then we
 					// just do what they ask. Nice and easy.
 					(PrerenderLimit::Limited(l), _) => l.get(),
 					// If they haven't limited it, but we don't have any search term that we're
 					// currently looking for, just go for all of it
-					(PrerenderLimit::All, None) => n_pages,
+					(PrerenderLimit::All, None) => n_pages.get(),
 					// If they haven't limited it, and we DO have a search term we need to look
 					// for, just do 20 so that we don't dramatically slow down the search process
 					// since they've specifically initiated that and so we want it to take priority
@@ -245,15 +265,15 @@ pub fn start_rendering(
 						if any_not_searched {
 							20
 						} else {
-							n_pages
+							n_pages.get()
 						},
-				});
-
-			let area_w = f32::from(area.width) * f32::from(col_w);
-			let area_h = f32::from(area.height) * f32::from(col_h);
+				}
+			));
 
 			// we go through each page
-			for (num, rendered) in page_iter {
+			for page_num in page_iter {
+				let rendered = &mut rendered[page_num];
+
 				// we only want to continue if one of the following is met:
 				// 1. It failed to render last time (we want to retry)
 				// 2. The `contained_term` is set to Unknown, meaning that we need to at least
@@ -262,18 +282,9 @@ pub fn start_rendering(
 					continue;
 				}
 
-				// check if we've been told to change the area that we're rendering to,
-				// or if we're told to rerender
-				match receiver.try_recv() {
-					// If it's disconnected, then the main loop is done, so we should just give up
-					Err(TryRecvError::Disconnected) => return Ok(()),
-					Ok(notif) => handle_notif!(notif),
-					Err(TryRecvError::Empty) => ()
-				};
-
 				// We know this is in range 'cause we're iterating over it but we still just want
 				// to be safe
-				let page = match doc.load_page(num as i32) {
+				let page = match doc.load_page(page_num as i32) {
 					Err(e) => {
 						sender.send(Err(RenderError::Doc(e)))?;
 						continue;
@@ -289,6 +300,7 @@ pub fn start_rendering(
 					invert,
 					black,
 					white,
+					fit_or_fill,
 					(area_w, area_h)
 				) {
 					// If that fn returned Some, that means it needed to be re-rendered for some
@@ -303,6 +315,8 @@ pub fn start_rendering(
 							continue;
 						};
 
+						log::debug!("got pixmap for page {page_num} with WxH {w}x{h}");
+
 						rendered.num_search_found = Some(ctx.result_rects.len());
 						rendered.successful = true;
 
@@ -312,13 +326,22 @@ pub fn start_rendering(
 								cell_w: (ctx.surface_w / f32::from(col_w)) as u16,
 								cell_h: (ctx.surface_h / f32::from(col_h)) as u16
 							},
-							page_num: num,
+							page_num,
 							result_rects: ctx.result_rects
 						})))?;
 					}
 					// And if we got an error, then obviously we need to propagate that
 					Err(e) => sender.send(Err(RenderError::Doc(e)))?
 				}
+
+				// check if we've been told to change the area that we're rendering to,
+				// or if we're told to rerender
+				match receiver.try_recv() {
+					// If it's disconnected, then the main loop is done, so we should just give up
+					Err(TryRecvError::Disconnected) => return Ok(()),
+					Ok(notif) => handle_notif!(notif),
+					Err(TryRecvError::Empty) => ()
+				};
 			}
 
 			// Now, if we have a search term, we want to look through the rest of the document past
@@ -373,7 +396,7 @@ pub fn start_rendering(
 
 					// now, we want to check if we've gone past the end - if so, we go back to the
 					// beginning so we can get the pages before the current one.
-					if search_start > n_pages {
+					if search_start > n_pages.get() {
 						if start_point == 0 {
 							break;
 						}
@@ -399,7 +422,7 @@ pub fn start_rendering(
 			// So now we've just *searched* all the pages but not necessarily rendered all of them.
 			// So if there are any we have yet to render, we need to loop back to the beginning of
 			// this loop to continue rendering all of them
-			if rendered.iter().any(|r| !r.successful) {
+			if rendered.iter().any(|r| !r.successful) && prerender == PrerenderLimit::All {
 				continue;
 			}
 
@@ -423,6 +446,7 @@ struct RenderedContext {
 	result_rects: Vec<HighlightRect>
 }
 
+#[expect(clippy::too_many_arguments)]
 fn render_single_page_to_ctx(
 	page: &Page,
 	search_term: Option<&str>,
@@ -430,6 +454,7 @@ fn render_single_page_to_ctx(
 	invert: bool,
 	black: i32,
 	white: i32,
+	fit_or_fill: FitOrFill,
 	(area_w, area_h): (f32, f32)
 ) -> Result<RenderedContext, mupdf::error::Error> {
 	let result_rects = match prev_render.num_search_found {
@@ -440,30 +465,21 @@ fn render_single_page_to_ctx(
 
 	// then, get the size of the page
 	let bounds = page.bounds()?;
-	let (p_width, p_height) = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+	let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
 
-	// and get its aspect ratio
-	let p_aspect_ratio = p_width / p_height;
+	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
+	let ScaledResult {
+		width: mut surface_w,
+		height: mut surface_h,
+		mut scale_factor
+	} = scaled;
 
-	// Then we get the full pixel dimensions of the area provided to us, and the aspect ratio
-	// of that area
-	let area_aspect_ratio = area_w / area_h;
-
-	// and get the ratio that this page would have to be scaled by to fit perfectly within the
-	// area provided to us.
-	// we do this first by comparing the aspec ratio of the page with the aspect ratio of the
-	// area to fit it within. If the aspect ratio of the page is larger, then we need to scale
-	// the width of the page to fill perfectly within the height of the area. Otherwise, we
-	// scale the height to fit perfectly. The dimension that _is not_ scaled to fit perfectly
-	// is scaled by the same factor as the dimension that _is_ scaled perfectly.
-	let scale_factor = if p_aspect_ratio > area_aspect_ratio {
-		area_w / p_width
-	} else {
-		area_h / p_height
-	};
-
-	let surface_w = p_width * scale_factor;
-	let surface_h = p_height * scale_factor;
+	if surface_w > KITTY_MAX_W_OR_H || surface_h > KITTY_MAX_W_OR_H {
+		let descale = (surface_w / KITTY_MAX_W_OR_H).max(surface_h / KITTY_MAX_W_OR_H);
+		surface_w /= descale;
+		surface_h /= descale;
+		scale_factor /= descale;
+	}
 
 	let colorspace = Colorspace::device_rgb();
 	let matrix = Matrix::new_scale(scale_factor, scale_factor);
@@ -545,4 +561,15 @@ fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::
 			})?;
 			Ok(count)
 		})
+}
+
+struct PopOnNext<'a> {
+	inner: &'a mut VecDeque<usize>
+}
+
+impl<'a> Iterator for PopOnNext<'a> {
+	type Item = usize;
+	fn next(&mut self) -> Option<Self::Item> {
+		self.inner.pop_front()
+	}
 }

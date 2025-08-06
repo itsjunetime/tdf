@@ -1,15 +1,58 @@
+use std::{
+	num::{NonZeroU32, NonZeroUsize},
+	time::{SystemTime, UNIX_EPOCH}
+};
+
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt;
 use image::DynamicImage;
-use itertools::Itertools;
+use kittage::NumberOrId;
 use ratatui::layout::Rect;
-use ratatui_image::{Resize, picker::Picker, protocol::Protocol};
+use ratatui_image::{
+	Resize,
+	picker::{Picker, ProtocolType},
+	protocol::Protocol
+};
 use rayon::iter::ParallelIterator;
 
-use crate::renderer::{PageInfo, RenderError, fill_default};
+use crate::{
+	renderer::{PageInfo, RenderError, fill_default},
+	skip::InterleavedAroundWithMax
+};
+
+#[derive(Debug)]
+pub enum MaybeTransferred {
+	NotYet(kittage::image::Image<'static>),
+	Transferred(kittage::ImageId)
+}
+
+pub enum ConvertedImage {
+	Generic(Protocol),
+	Kitty {
+		img: MaybeTransferred,
+		cell_w: u16,
+		cell_h: u16
+	}
+}
+
+impl ConvertedImage {
+	pub fn w_h(&self) -> (u16, u16) {
+		match self {
+			Self::Generic(prot) => {
+				let a = prot.area();
+				(a.width, a.height)
+			}
+			Self::Kitty {
+				img: _,
+				cell_w,
+				cell_h
+			} => (*cell_w, *cell_h)
+		}
+	}
+}
 
 pub struct ConvertedPage {
-	pub page: Protocol,
+	pub page: ConvertedImage,
 	pub num: usize,
 	pub num_results: usize
 }
@@ -24,17 +67,21 @@ pub async fn run_conversion_loop(
 	sender: Sender<Result<ConvertedPage, RenderError>>,
 	receiver: Receiver<ConverterMsg>,
 	mut picker: Picker,
-	prerender: usize
+	prerender: usize,
+	shms_work: bool
 ) -> Result<(), SendError<Result<ConvertedPage, RenderError>>> {
 	let mut images = vec![];
 	let mut page: usize = 0;
+	let pid = std::process::id();
 
 	fn next_page(
 		images: &mut [Option<PageInfo>],
 		picker: &mut Picker,
 		page: usize,
 		iteration: &mut usize,
-		prerender: usize
+		prerender: usize,
+		pid: u32,
+		shms_work: bool
 	) -> Result<Option<ConvertedPage>, RenderError> {
 		if images.is_empty() || *iteration >= prerender {
 			return Ok(None);
@@ -45,13 +92,19 @@ pub async fn run_conversion_loop(
 		let idx_start = page.saturating_sub(prerender / 2);
 		let idx_end = idx_start.saturating_add(prerender).min(images.len());
 
+		// If there's none to render, then why bother.
+		let Some(idx_end) = NonZeroUsize::new(idx_end) else {
+			return Ok(None);
+		};
+
 		// then we go through all the indices available to us and find the first one that has an
 		// image available to steal
-		let Some((page_info, new_iter)) = (idx_start..page)
-			.interleave(page..idx_end)
-			.enumerate()
-			// .skip(*iteration)
-			.find_map(|(i_idx, p_idx)| images[p_idx].take().map(|p| (p, i_idx)))
+		let Some((page_info, new_iter, page_num)) =
+			InterleavedAroundWithMax::new(page, idx_start, idx_end)
+				.enumerate()
+				.take(prerender)
+				// .skip(*iteration)
+				.find_map(|(i_idx, p_idx)| images[p_idx].take().map(|p| (p, i_idx, p_idx)))
 		else {
 			return Ok(None);
 		};
@@ -81,17 +134,40 @@ pub async fn run_conversion_loop(
 			y: 0
 		};
 
-		// We don't actually want to Crop this image, but we've already
-		// verified (with the ImageSurface stuff) that the image is the correct
-		// size for the area given, so to save ratatui the work of having to
-		// resize it, we tell them to crop it to fit.
-		let txt_img = picker
-			.new_protocol(dyn_img, img_area, Resize::None)
-			.map_err(|e| {
-				RenderError::Converting(format!(
-					"Couldn't convert DynamicImage to ratatui image: {e}"
-				))
-			})?;
+		let txt_img = match picker.protocol_type() {
+			ProtocolType::Kitty => {
+				let rn = SystemTime::now()
+					.duration_since(UNIX_EPOCH)
+					.unwrap_or_default()
+					.as_nanos();
+
+				let mut img = if shms_work {
+					kittage::image::Image::shm_from(
+						dyn_img,
+						&format!("__tdf_kittage_{pid}_page_{rn}_{page_num}")
+					)
+					.map_err(|e| RenderError::Converting(format!("Couldn't write to shm: {e}")))?
+				} else {
+					kittage::image::Image::from(dyn_img)
+				};
+
+				img.num_or_id = NumberOrId::Id(NonZeroU32::new(page_num as u32 + 1).unwrap());
+				ConvertedImage::Kitty {
+					img: MaybeTransferred::NotYet(img),
+					cell_w: page_info.img_data.cell_w,
+					cell_h: page_info.img_data.cell_h
+				}
+			}
+			_ => ConvertedImage::Generic(
+				picker
+					.new_protocol(dyn_img, img_area, Resize::None)
+					.map_err(|e| {
+						RenderError::Converting(format!(
+							"Couldn't convert DynamicImage to ratatui image: {e}"
+						))
+					})?
+			)
+		};
 
 		// update the iteration to the iteration that we stole this image from
 		*iteration = new_iter;
@@ -130,7 +206,15 @@ pub async fn run_conversion_loop(
 				Err(TryRecvError::Disconnected) => return Ok(())
 			}
 
-			match next_page(&mut images, &mut picker, page, &mut iteration, prerender) {
+			match next_page(
+				&mut images,
+				&mut picker,
+				page,
+				&mut iteration,
+				prerender,
+				pid,
+				shms_work
+			) {
 				Ok(None) => break,
 				Ok(Some(img)) => sender.send(Ok(img))?,
 				Err(e) => sender.send(Err(e))?

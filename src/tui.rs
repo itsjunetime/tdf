@@ -394,7 +394,8 @@ impl Tui {
 
 		let old = self.page;
 		match change {
-			PageChange::Next => self.set_page((self.page + diff).min(self.rendered.len() - 1)),
+			PageChange::Next =>
+				self.set_page((self.page + diff).min(self.rendered.len().saturating_sub(1))),
 			PageChange::Prev => self.set_page(self.page.saturating_sub(diff))
 		}
 
@@ -653,13 +654,9 @@ impl Tui {
 								self.last_render.rect = Rect::default();
 								Some(InputAction::SwitchRenderZoom(f_or_f))
 							}
-							/*'o' if self.is_kitty => {
-								if let Some(z) = &mut self.zoom {
-									z.level = z.level.saturating_add(1);
-								}
-								self.last_render.rect = Rect::default();
-								Some(InputAction::Redraw)
-							}*/
+							'o' if self.is_kitty => self.update_zoom(|z|
+								// TODO: for now, we don't let people zoom in past fill-screen
+								z.level = z.level.saturating_add(1).min(0)),
 							'O' if self.is_kitty =>
 								self.update_zoom(|z| z.level = z.level.saturating_sub(1)),
 							'L' if self.is_kitty => self.update_zoom(|z| {

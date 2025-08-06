@@ -1,5 +1,7 @@
 # Unreleased
 
+# v0.4.0
+
 - Update to new `kittage` backend for kitty-protocol-supporting terminals (fixes many issues and improves performance significantly, see [the PR](https://github.com/itsjunetime/tdf/pull/74))
 - Use new mupdf search API for slightly better performance
 - Update ratatui(-image) dependencies

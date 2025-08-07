@@ -788,7 +788,7 @@ impl Tui {
 		})));
 	}
 
-	fn set_page(&mut self, page: usize) {
+	pub fn set_page(&mut self, page: usize) {
 		if page != self.page {
 			// mark that we need to re-render the images
 			self.last_render.rect = Rect::default();

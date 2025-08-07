@@ -34,7 +34,8 @@ use tdf::{
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
-	tui::{BottomMessage, InputAction, MessageSetting, Tui}
+	tui::{BottomMessage, InputAction, MessageSetting, Tui},
+	config::DocumentHistoryConfig
 };
 
 // Dummy struct for easy errors in main
@@ -78,10 +79,8 @@ async fn main() -> Result<(), WrappedErr> {
 		required file: PathBuf
 	};
 
-	let path = flags
-		.file
-		.canonicalize()
-		.map_err(|e| WrappedErr(format!("Cannot canonicalize provided file: {e}").into()))?;
+	let mut document_history_config = DocumentHistoryConfig::load();
+	let path = flags.file.canonicalize().map_err(|e| WrappedErr(format!("Cannot canonicalize provided file: {e}").into()))?;
 
 	let black =
 		parse_color_to_i32(flags.black_color.as_deref().unwrap_or("000000")).map_err(|e| {
@@ -211,12 +210,15 @@ async fn main() -> Result<(), WrappedErr> {
 		|| "Unknown file".into(),
 		|n| n.to_string_lossy().to_string()
 	);
-	let tui = Tui::new(
+	let mut tui = Tui::new(
 		file_name,
 		flags.max_wide,
 		flags.r_to_l.unwrap_or_default(),
 		is_kitty
 	);
+	if let Some(last_page) = document_history_config.last_pages_opened.get(&path.to_string_lossy().to_string()) {
+		tui.set_page(*last_page);
+	}
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend).map_err(|e| {
@@ -277,7 +279,7 @@ async fn main() -> Result<(), WrappedErr> {
 		to_converter,
 		from_converter,
 		fullscreen,
-		tui,
+		&mut tui,
 		&mut term,
 		main_area,
 		font_size
@@ -302,6 +304,9 @@ async fn main() -> Result<(), WrappedErr> {
 
 	drop(maybe_logger);
 
+	document_history_config.last_pages_opened.insert(path.to_string_lossy().to_string(), tui.page);
+	document_history_config.save();
+
 	Ok(())
 }
 
@@ -314,7 +319,7 @@ async fn enter_redraw_loop(
 	to_converter: Sender<ConverterMsg>,
 	mut from_converter: RecvStream<'_, Result<ConvertedPage, RenderError>>,
 	mut fullscreen: bool,
-	mut tui: Tui,
+	tui: &mut Tui,
 	term: &mut Terminal<CrosstermBackend<Stdout>>,
 	mut main_area: tdf::tui::RenderLayout,
 	font_size: FontSize

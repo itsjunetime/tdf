@@ -9,12 +9,12 @@ pub enum PrerenderLimit {
 	Limited(NonZeroUsize)
 }
 
+pub mod config;
 pub mod converter;
 pub mod kitty;
 pub mod renderer;
 pub mod skip;
 pub mod tui;
-pub mod config;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum FitOrFill {

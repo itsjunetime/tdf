@@ -31,11 +31,11 @@ use ratatui_image::{
 };
 use tdf::{
 	PrerenderLimit,
+	config::DocumentHistoryConfig,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
-	tui::{BottomMessage, InputAction, MessageSetting, Tui},
-	config::DocumentHistoryConfig
+	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
 
 // Dummy struct for easy errors in main
@@ -80,7 +80,10 @@ async fn main() -> Result<(), WrappedErr> {
 	};
 
 	let mut document_history_config = DocumentHistoryConfig::load();
-	let path = flags.file.canonicalize().map_err(|e| WrappedErr(format!("Cannot canonicalize provided file: {e}").into()))?;
+	let path = flags
+		.file
+		.canonicalize()
+		.map_err(|e| WrappedErr(format!("Cannot canonicalize provided file: {e}").into()))?;
 
 	let black =
 		parse_color_to_i32(flags.black_color.as_deref().unwrap_or("000000")).map_err(|e| {
@@ -216,7 +219,10 @@ async fn main() -> Result<(), WrappedErr> {
 		flags.r_to_l.unwrap_or_default(),
 		is_kitty
 	);
-	if let Some(last_page) = document_history_config.last_pages_opened.get(&path.to_string_lossy().to_string()) {
+	if let Some(last_page) = document_history_config
+		.last_pages_opened
+		.get(&path.to_string_lossy().to_string())
+	{
 		tui.set_page(*last_page);
 	}
 
@@ -304,7 +310,9 @@ async fn main() -> Result<(), WrappedErr> {
 
 	drop(maybe_logger);
 
-	document_history_config.last_pages_opened.insert(path.to_string_lossy().to_string(), tui.page);
+	document_history_config
+		.last_pages_opened
+		.insert(path.to_string_lossy().to_string(), tui.page);
 	document_history_config.save();
 
 	Ok(())

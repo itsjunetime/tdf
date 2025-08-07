@@ -69,6 +69,7 @@ cbz = ["mupdf/cbz"]
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["async_tokio"] }
 cpuprofiler = "0.0.4"
+tempfile = "3.0"
 
 [[bench]]
 name = "rendering"

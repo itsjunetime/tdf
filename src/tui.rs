@@ -18,8 +18,8 @@ use ratatui::{
 	layout::{Constraint, Flex, Layout, Position, Rect},
 	style::{Color, Style},
 	symbols::border,
-	text::{Span, Text},
-	widgets::{Block, Borders, Clear, Padding}
+	text::Span,
+	widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap}
 };
 use ratatui_image::{FontSize, Image};
 
@@ -830,7 +830,7 @@ impl Tui {
 			.border_set(border::ROUNDED)
 			.border_style(Color::Blue);
 
-		let help_span = Text::raw(HELP_PAGE);
+		let help_span = Paragraph::new(HELP_PAGE).wrap(Wrap { trim: false });
 
 		let max_w: u16 = HELP_PAGE
 			.lines()
@@ -863,25 +863,31 @@ impl Tui {
 
 static HELP_PAGE: &str = "\
 l, h, left, right:
-	Go forward/backwards a single page
+    Go forward/backwards a single page
 j, k, down, up:
-	Go forwards/backwards a screen's worth of pages
+    Go forwards/backwards a screen's worth of pages
 q, esc:
-	Quit
+    Quit
 g:
-	Go to specific page (type numbers after 'g')
+    Go to specific page (type numbers after 'g')
 /:
-	Search
+    Search
 n, N:
-	Next/Previous search result
+    Next/Previous search result
 i:
-	Invert colors
+    Invert colors
 f:
-	Remove borders/fullscreen
+    Remove borders/fullscreen
+z (when using kitty protocol):
+    Toggle between fill-screen and fit-screen
+o/O (when on fill-screen):
+    zoom in and out, respectively
+H, J, K, L (when zoomed in):
+    pan direction around page
 ?:
-	Show this page
+    Show this page
 ctrl+z:
-	Suspend & background tdf \
+    Suspend & background tdf \
 ";
 
 pub enum InputAction {

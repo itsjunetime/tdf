@@ -1,5 +1,7 @@
 # Unreleased
 
+- Add `--version` flag
+
 # v0.4.1
 
 - Add instructions for using new zoom/pan features to help page

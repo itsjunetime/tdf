@@ -74,12 +74,24 @@ async fn main() -> Result<(), WrappedErr> {
 		optional -w,--white-color white: String
 		/// Custom black color, specified in css format (e.g "000000" or "rgb(0, 0, 0)")
 		optional -b,--black-color black: String
+		/// Print the version and exit
+		optional --version
 		/// PDF file to read
-		required file: PathBuf
+		optional file: PathBuf
 	};
 
-	let path = flags
-		.file
+	if flags.version {
+		println!("{}", env!("CARGO_PKG_VERSION"));
+		return Ok(());
+	}
+
+	let Some(file) = flags.file else {
+		return Err(WrappedErr(
+			"Please specify the file to open, e.g. `tdf ./my_example_pdf.pdf`".into()
+		));
+	};
+
+	let path = file
 		.canonicalize()
 		.map_err(|e| WrappedErr(format!("Cannot canonicalize provided file: {e}").into()))?;
 

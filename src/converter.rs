@@ -142,11 +142,10 @@ pub async fn run_conversion_loop(
 					.as_millis() % 1_000_000;
 
 				let mut img = if shms_work {
-					kittage::image::Image::shm_from(
-						dyn_img,
-						&format!("tdf_{pid}_{rn}_{page_num}")
-					)
-					.map_err(|e| RenderError::Converting(format!("Couldn't write to shm: {e}")))?
+					kittage::image::Image::shm_from(dyn_img, &format!("tdf_{pid}_{rn}_{page_num}"))
+						.map_err(|e| {
+							RenderError::Converting(format!("Couldn't write to shm: {e}"))
+						})?
 				} else {
 					kittage::image::Image::from(dyn_img)
 				};

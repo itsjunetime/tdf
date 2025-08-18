@@ -1,6 +1,9 @@
 # Unreleased
 
+# v0.4.2
+
 - Add `--version` flag
+- Fix shms not working on macos ([#93](https://github.com/itsjunetime/tdf/pull/93))
 
 # v0.4.1
 

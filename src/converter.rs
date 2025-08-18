@@ -139,14 +139,13 @@ pub async fn run_conversion_loop(
 				let rn = SystemTime::now()
 					.duration_since(UNIX_EPOCH)
 					.unwrap_or_default()
-					.as_nanos();
+					.as_millis() % 1_000_000;
 
 				let mut img = if shms_work {
-					kittage::image::Image::shm_from(
-						dyn_img,
-						&format!("__tdf_kittage_{pid}_page_{rn}_{page_num}")
-					)
-					.map_err(|e| RenderError::Converting(format!("Couldn't write to shm: {e}")))?
+					kittage::image::Image::shm_from(dyn_img, &format!("tdf_{pid}_{rn}_{page_num}"))
+						.map_err(|e| {
+							RenderError::Converting(format!("Couldn't write to shm: {e}"))
+						})?
 				} else {
 					kittage::image::Image::from(dyn_img)
 				};

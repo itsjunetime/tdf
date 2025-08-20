@@ -1,7 +1,7 @@
 use std::{borrow::Cow, io::stdout, num::NonZeroUsize};
 
 use crossterm::{
-	event::{Event, KeyCode, KeyModifiers, MouseEvent, MouseEventKind},
+	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
 	execute,
 	terminal::{
 		BeginSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,

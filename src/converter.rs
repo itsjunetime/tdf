@@ -16,7 +16,7 @@ use ratatui_image::{
 use rayon::iter::ParallelIterator;
 
 use crate::{
-	renderer::{LinkRect, PageInfo, RenderError, fill_default},
+	renderer::{Link, PageInfo, RenderError, fill_default},
 	skip::InterleavedAroundWithMax
 };
 
@@ -55,7 +55,7 @@ pub struct ConvertedPage {
 	pub page: ConvertedImage,
 	pub num: usize,
 	pub num_results: usize,
-	pub links: Vec<LinkRect>
+	pub links: Vec<Link>
 }
 
 pub enum ConverterMsg {

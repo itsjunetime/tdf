@@ -27,7 +27,7 @@ use crate::{
 	FitOrFill,
 	converter::{ConvertedImage, MaybeTransferred},
 	kitty::{KittyDisplay, KittyReadyToDisplay},
-	renderer::{LinkRect, RenderError, fill_default},
+	renderer::{Link, RenderError, fill_default},
 	skip::Skip
 };
 
@@ -102,7 +102,7 @@ pub struct RenderedInfo {
 	// whatever I guess
 	num_results: Option<usize>,
 	// Links detected on this page
-	links: Vec<LinkRect>
+	links: Vec<Link>
 }
 
 #[derive(PartialEq)]
@@ -430,7 +430,7 @@ impl Tui {
 		img: ConvertedImage,
 		page_num: usize,
 		num_results: usize,
-		links: Vec<LinkRect>
+		links: Vec<Link>
 	) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
@@ -515,9 +515,7 @@ impl Tui {
 		};
 
 		// Check if current page has links
-		let has_links = rendered
-			.get(page_num)
-			.map_or(false, |r| !r.links.is_empty());
+		let has_links = rendered.get(page_num).is_some_and(|r| !r.links.is_empty());
 
 		let bottom_layout = Layout::horizontal([
 			Constraint::Fill(1),
@@ -1017,7 +1015,7 @@ impl Tui {
 						format!("  {}. ", i + 1) // Normal items get spaces
 					};
 
-					text.push_str(&format!("{}{}\n", prefix, truncated_uri));
+					text.push_str(&format!("{prefix}{truncated_uri}\n"));
 				}
 				text
 			}

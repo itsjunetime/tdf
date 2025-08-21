@@ -42,7 +42,7 @@ pub struct PageInfo {
 	pub img_data: ImageData,
 	pub page_num: usize,
 	pub result_rects: Vec<HighlightRect>,
-	pub links: Vec<LinkRect>
+	pub links: Vec<Link>
 }
 
 #[derive(Clone)]
@@ -446,7 +446,7 @@ struct RenderedContext {
 	surface_w: f32,
 	surface_h: f32,
 	result_rects: Vec<HighlightRect>,
-	links: Vec<LinkRect>
+	links: Vec<Link>
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -515,7 +515,7 @@ fn render_single_page_to_ctx(
 		})
 		.collect::<Vec<_>>();
 
-	let links = extract_page_links(page, scale_factor)?;
+	let links = extract_page_links(page)?;
 
 	Ok(RenderedContext {
 		pixmap,
@@ -535,11 +535,7 @@ pub struct HighlightRect {
 }
 
 #[derive(Clone, Debug)]
-pub struct LinkRect {
-	pub ul_x: u32,
-	pub ul_y: u32,
-	pub lr_x: u32,
-	pub lr_y: u32,
+pub struct Link {
 	pub uri: String,
 	pub target_page: Option<u32>
 }
@@ -579,24 +575,15 @@ fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::
 		})
 }
 
-fn extract_page_links(
-	page: &Page,
-	scale_factor: f32
-) -> Result<Vec<LinkRect>, mupdf::error::Error> {
+fn extract_page_links(page: &Page) -> Result<Vec<Link>, mupdf::error::Error> {
 	let links = page.links()?;
 	let mut unique_links = Vec::new();
 	let mut seen_uris = std::collections::HashSet::new();
 
 	for link in links {
-		let bounds = link.bounds;
-		let ul_x = (bounds.x0 * scale_factor) as u32;
-		let ul_y = (bounds.y0 * scale_factor) as u32;
-		let lr_x = (bounds.x1 * scale_factor) as u32;
-		let lr_y = (bounds.y1 * scale_factor) as u32;
-
 		let uri = if link.uri.starts_with("http") {
 			link.uri.clone()
-		} else if link.uri.starts_with("#") {
+		} else if link.uri.starts_with('#') {
 			format!("Internal: {}", link.uri)
 		} else if link.uri.is_empty() {
 			"Unknown link".to_string()
@@ -610,14 +597,7 @@ fn extract_page_links(
 
 			let target_page = Some(link.page);
 
-			unique_links.push(LinkRect {
-				ul_x,
-				ul_y,
-				lr_x,
-				lr_y,
-				uri,
-				target_page
-			});
+			unique_links.push(Link { uri, target_page });
 		}
 	}
 

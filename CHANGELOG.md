@@ -1,5 +1,16 @@
 # Unreleased
 
+- Allow using ctrl+scroll to zoom in/out while zoomed using kitty backend
+
+# v0.4.2
+
+- Add `--version` flag
+- Fix shms not working on macos ([#93](https://github.com/itsjunetime/tdf/pull/93))
+
+# v0.4.1
+
+- Add instructions for using new zoom/pan features to help page
+
 # v0.4.0
 
 - Update to new `kittage` backend for kitty-protocol-supporting terminals (fixes many issues and improves performance significantly, see [the PR](https://github.com/itsjunetime/tdf/pull/74))

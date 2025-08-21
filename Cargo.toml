@@ -1,6 +1,6 @@
 [package]
 name = "tdf-viewer"
-version = "0.3.0"
+version = "0.4.2"
 authors = ["June Welker <junewelker@gmail.com>"]
 edition = "2024"
 description = "A terminal viewer for PDFs"
@@ -11,7 +11,7 @@ license = "AGPL-3.0-only"
 keywords = ["pdf", "tui", "cli", "terminal"]
 categories = ["command-line-utilities", "text-processing", "visualization"]
 default-run = "tdf"
-rust-version = "1.85"
+rust-version = "1.86"
 
 [[bin]]
 name = "tdf"

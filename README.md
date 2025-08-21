@@ -25,7 +25,7 @@ If it turns out that you're missing one of these, it will fail to compile and te
 
 1. Get the rust toolchain from [rustup.rs](https://rustup.rs)
 2. Clone the repo and `cd` into it
-3. Run `cargo build --release`
+3. Run `cargo +nightly build --release`
 
 The binary should then be found at `./target/release/tdf`.
 

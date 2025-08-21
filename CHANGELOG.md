@@ -1,5 +1,7 @@
 # Unreleased
 
+- Allow using ctrl+scroll to zoom in/out while zoomed using kitty backend
+
 # v0.4.2
 
 - Add `--version` flag

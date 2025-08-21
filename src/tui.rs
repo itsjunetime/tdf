@@ -619,7 +619,7 @@ impl Tui {
 										rendered_info.links.get(self.selected_link_index)
 									{
 										// Copy to clipboard using copypasta
-										use copypasta::{ClipboardProvider, ClipboardContext};
+										use copypasta::{ClipboardContext, ClipboardProvider};
 										if let Ok(mut ctx) = ClipboardContext::new() {
 											let _ = ctx.set_contents(link.uri.clone());
 										}
@@ -768,21 +768,10 @@ impl Tui {
 						}
 					},
 					KeyCode::Enter if self.showing_links_menu => {
-						// Open the selected link with system default application
 						if let Some(rendered_info) = self.rendered.get(self.page) {
 							if let Some(link) = rendered_info.links.get(self.selected_link_index) {
-								// Try to open the URL with the system default application
 								if link.uri.starts_with("http") {
-									#[cfg(target_os = "macos")]
-									let _ = std::process::Command::new("open").arg(&link.uri).spawn();
-
-									#[cfg(target_os = "linux")]
-									let _ = std::process::Command::new("xdg-open")
-										.arg(&link.uri)
-										.spawn();
-
-									#[cfg(target_os = "windows")]
-									let _ = std::process::Command::new("start").arg(&link.uri).spawn();
+									let _ = open::that(&link.uri);
 								}
 							}
 						}

@@ -41,6 +41,7 @@ nix = { version = "0.30.0", features = ["signal"] }
 mupdf = { version = "0.5.0", default-features = false, features = ["svg", "system-fonts", "img"] }
 rayon = { version = "*", default-features = false }
 copypasta = "0.10.2"
+open = "5.3.2"
 # kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
 kittage = { git = "https://github.com/itsjunetime/kittage.git", features = ["crossterm-tokio", "image-crate", "log"] }
 memmap2 = "*"

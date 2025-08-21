@@ -581,23 +581,18 @@ fn extract_page_links(page: &Page) -> Result<Vec<Link>, mupdf::error::Error> {
 	let mut seen_uris = std::collections::HashSet::new();
 
 	for link in links {
-		let uri = if link.uri.starts_with("http") {
-			link.uri.clone()
-		} else if link.uri.starts_with('#') {
-			format!("Internal: {}", link.uri)
-		} else if link.uri.is_empty() {
-			"Unknown link".to_string()
-		} else {
-			format!("Link: {}", link.uri)
-		};
+		// Only include HTTP/HTTPS URLs, skip internal links and empty URIs
+		if link.uri.starts_with("http") {
+			let uri = link.uri.clone();
 
-		// Only add if we haven't seen this URI before
-		if !seen_uris.contains(&uri) {
-			seen_uris.insert(uri.clone());
+			// Only add if we haven't seen this URI before
+			if !seen_uris.contains(&uri) {
+				seen_uris.insert(uri.clone());
 
-			let target_page = Some(link.page);
+				let target_page = Some(link.page);
 
-			unique_links.push(Link { uri, target_page });
+				unique_links.push(Link { uri, target_page });
+			}
 		}
 	}
 

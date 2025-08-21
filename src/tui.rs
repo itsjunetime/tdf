@@ -618,38 +618,10 @@ impl Tui {
 									if let Some(link) =
 										rendered_info.links.get(self.selected_link_index)
 									{
-										// Try to copy to clipboard using platform-specific commands
-										use std::io::Write;
-
-										#[cfg(target_os = "macos")]
-										if let Ok(mut child) = std::process::Command::new("pbcopy")
-											.stdin(std::process::Stdio::piped())
-											.spawn()
-										{
-											if let Some(stdin) = child.stdin.as_mut() {
-												let _ = stdin.write_all(link.uri.as_bytes());
-											}
-										}
-
-										#[cfg(target_os = "linux")]
-										if let Ok(mut child) = std::process::Command::new("xclip")
-											.args(["-selection", "clipboard"])
-											.stdin(std::process::Stdio::piped())
-											.spawn()
-										{
-											if let Some(stdin) = child.stdin.as_mut() {
-												let _ = stdin.write_all(link.uri.as_bytes());
-											}
-										}
-
-										#[cfg(target_os = "windows")]
-										if let Ok(mut child) = std::process::Command::new("clip")
-											.stdin(std::process::Stdio::piped())
-											.spawn()
-										{
-											if let Some(stdin) = child.stdin.as_mut() {
-												let _ = stdin.write_all(link.uri.as_bytes());
-											}
+										// Copy to clipboard using copypasta
+										use copypasta::{ClipboardProvider, ClipboardContext};
+										if let Ok(mut ctx) = ClipboardContext::new() {
+											let _ = ctx.set_contents(link.uri.clone());
 										}
 									}
 								}

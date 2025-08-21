@@ -41,7 +41,8 @@ pub enum RenderInfo {
 pub struct PageInfo {
 	pub img_data: ImageData,
 	pub page_num: usize,
-	pub result_rects: Vec<HighlightRect>
+	pub result_rects: Vec<HighlightRect>,
+	pub links: Vec<LinkRect>
 }
 
 #[derive(Clone)]
@@ -327,7 +328,8 @@ pub fn start_rendering(
 								cell_h: (ctx.surface_h / f32::from(col_h)) as u16
 							},
 							page_num,
-							result_rects: ctx.result_rects
+							result_rects: ctx.result_rects,
+							links: ctx.links
 						})))?;
 					}
 					// And if we got an error, then obviously we need to propagate that
@@ -443,7 +445,8 @@ struct RenderedContext {
 	pixmap: Pixmap,
 	surface_w: f32,
 	surface_h: f32,
-	result_rects: Vec<HighlightRect>
+	result_rects: Vec<HighlightRect>,
+	links: Vec<LinkRect>
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -512,11 +515,14 @@ fn render_single_page_to_ctx(
 		})
 		.collect::<Vec<_>>();
 
+	let links = extract_page_links(page, scale_factor)?;
+
 	Ok(RenderedContext {
 		pixmap,
 		surface_w,
 		surface_h,
-		result_rects
+		result_rects,
+		links
 	})
 }
 
@@ -526,6 +532,16 @@ pub struct HighlightRect {
 	pub ul_y: u32,
 	pub lr_x: u32,
 	pub lr_y: u32
+}
+
+#[derive(Clone, Debug)]
+pub struct LinkRect {
+	pub ul_x: u32,
+	pub ul_y: u32,
+	pub lr_x: u32,
+	pub lr_y: u32,
+	pub uri: String,
+	pub target_page: Option<u32>
 }
 
 #[inline]
@@ -561,6 +577,51 @@ fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::
 			})?;
 			Ok(count)
 		})
+}
+
+fn extract_page_links(
+	page: &Page,
+	scale_factor: f32
+) -> Result<Vec<LinkRect>, mupdf::error::Error> {
+	let links = page.links()?;
+	let mut unique_links = Vec::new();
+	let mut seen_uris = std::collections::HashSet::new();
+
+	for link in links {
+		let bounds = link.bounds;
+		let ul_x = (bounds.x0 * scale_factor) as u32;
+		let ul_y = (bounds.y0 * scale_factor) as u32;
+		let lr_x = (bounds.x1 * scale_factor) as u32;
+		let lr_y = (bounds.y1 * scale_factor) as u32;
+
+		let uri = if link.uri.starts_with("http") {
+			link.uri.clone()
+		} else if link.uri.starts_with("#") {
+			format!("Internal: {}", link.uri)
+		} else if link.uri.is_empty() {
+			"Unknown link".to_string()
+		} else {
+			format!("Link: {}", link.uri)
+		};
+
+		// Only add if we haven't seen this URI before
+		if !seen_uris.contains(&uri) {
+			seen_uris.insert(uri.clone());
+
+			let target_page = Some(link.page);
+
+			unique_links.push(LinkRect {
+				ul_x,
+				ul_y,
+				lr_x,
+				lr_y,
+				uri,
+				target_page
+			});
+		}
+	}
+
+	Ok(unique_links)
 }
 
 struct PopOnNext<'a> {

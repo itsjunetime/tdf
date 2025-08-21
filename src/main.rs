@@ -239,7 +239,8 @@ async fn main() -> Result<(), WrappedErr> {
 	execute!(
 		term.backend_mut(),
 		EnterAlternateScreen,
-		crossterm::cursor::Hide
+		crossterm::cursor::Hide,
+		crossterm::event::EnableMouseCapture
 	)
 	.map_err(|e| {
 		WrappedErr(
@@ -307,7 +308,8 @@ async fn main() -> Result<(), WrappedErr> {
 	execute!(
 		term.backend_mut(),
 		LeaveAlternateScreen,
-		crossterm::cursor::Show
+		crossterm::cursor::Show,
+		crossterm::event::DisableMouseCapture
 	)
 	.unwrap();
 	disable_raw_mode().unwrap();

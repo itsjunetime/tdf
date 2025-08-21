@@ -624,7 +624,8 @@ impl Tui {
 								execute!(
 									&mut backend,
 									LeaveAlternateScreen,
-									crossterm::cursor::Show
+									crossterm::cursor::Show,
+									crossterm::event::DisableMouseCapture
 								)
 								.unwrap();
 								disable_raw_mode().unwrap();
@@ -638,7 +639,8 @@ impl Tui {
 								execute!(
 									&mut backend,
 									EnterAlternateScreen,
-									crossterm::cursor::Hide
+									crossterm::cursor::Hide,
+									crossterm::event::EnableMouseCapture
 								)
 								.unwrap();
 
@@ -754,17 +756,32 @@ impl Tui {
 					_ => None
 				}
 			}
-			Event::Mouse(mouse) => match mouse.kind {
-				MouseEventKind::ScrollRight =>
-					self.change_page(PageChange::Next, ChangeAmount::Single),
-				MouseEventKind::ScrollDown =>
-					self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
-				MouseEventKind::ScrollLeft =>
-					self.change_page(PageChange::Prev, ChangeAmount::Single),
-				MouseEventKind::ScrollUp =>
-					self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-				_ => None
-			},
+			Event::Mouse(mouse) => {
+				if mouse.modifiers.contains(KeyModifiers::CONTROL)
+					&& self.is_kitty
+					&& self.zoom.is_some()
+				{
+					match mouse.kind {
+						MouseEventKind::ScrollUp =>
+							self.update_zoom(|z| z.level = z.level.saturating_add(1).min(0)),
+						MouseEventKind::ScrollDown =>
+							self.update_zoom(|z| z.level = z.level.saturating_sub(1)),
+						_ => None
+					}
+				} else {
+					match mouse.kind {
+						MouseEventKind::ScrollRight =>
+							self.change_page(PageChange::Next, ChangeAmount::Single),
+						MouseEventKind::ScrollDown =>
+							self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
+						MouseEventKind::ScrollLeft =>
+							self.change_page(PageChange::Prev, ChangeAmount::Single),
+						MouseEventKind::ScrollUp =>
+							self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
+						_ => None
+					}
+				}
+			}
 			Event::Resize(_, _) => Some(InputAction::Redraw),
 			_ => None
 		}

@@ -380,8 +380,8 @@ async fn enter_redraw_loop(
 			}
 			Some(img_res) = from_converter.next() => {
 				match img_res {
-					Ok(ConvertedPage { page, num, num_results }) => {
-						tui.page_ready(page, num, num_results);
+					Ok(ConvertedPage { page, num, num_results, links }) => {
+						tui.page_ready(page, num, num_results, links);
 						if num == tui.page {
 							needs_redraw = true;
 						}

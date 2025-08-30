@@ -31,6 +31,7 @@ use ratatui_image::{
 };
 use tdf::{
 	PrerenderLimit,
+	config::DocumentHistoryConfig,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
@@ -223,12 +224,19 @@ async fn main() -> Result<(), WrappedErr> {
 		|| "Unknown file".into(),
 		|n| n.to_string_lossy().to_string()
 	);
-	let tui = Tui::new(
+	let mut tui = Tui::new(
 		file_name,
 		flags.max_wide,
 		flags.r_to_l.unwrap_or_default(),
 		is_kitty
 	);
+	let mut document_history_config = DocumentHistoryConfig::load();
+	if let Some(last_page) = document_history_config
+		.last_pages_opened
+		.get(&path.to_string_lossy().to_string())
+	{
+		tui.set_page(*last_page);
+	}
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend).map_err(|e| {
@@ -290,7 +298,7 @@ async fn main() -> Result<(), WrappedErr> {
 		to_converter,
 		from_converter,
 		fullscreen,
-		tui,
+		&mut tui,
 		&mut term,
 		main_area,
 		font_size
@@ -316,6 +324,11 @@ async fn main() -> Result<(), WrappedErr> {
 
 	drop(maybe_logger);
 
+	document_history_config
+		.last_pages_opened
+		.insert(path.to_string_lossy().to_string(), tui.page);
+	document_history_config.save();
+
 	Ok(())
 }
 
@@ -328,7 +341,7 @@ async fn enter_redraw_loop(
 	to_converter: Sender<ConverterMsg>,
 	mut from_converter: RecvStream<'_, Result<ConvertedPage, RenderError>>,
 	mut fullscreen: bool,
-	mut tui: Tui,
+	tui: &mut Tui,
 	term: &mut Terminal<CrosstermBackend<Stdout>>,
 	mut main_area: tdf::tui::RenderLayout,
 	font_size: FontSize

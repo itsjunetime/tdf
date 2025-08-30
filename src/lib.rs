@@ -9,6 +9,7 @@ pub enum PrerenderLimit {
 	Limited(NonZeroUsize)
 }
 
+pub mod config;
 pub mod converter;
 pub mod kitty;
 pub mod renderer;

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, io::stdout, num::NonZeroUsize};
+use std::{io::stdout, num::NonZeroUsize};
 
 use crossterm::{
 	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
@@ -27,7 +27,7 @@ use crate::{
 	FitOrFill,
 	converter::{ConvertedImage, MaybeTransferred},
 	kitty::{KittyDisplay, KittyReadyToDisplay},
-	renderer::{RenderError, fill_default},
+	renderer::{Link, RenderError, fill_default},
 	skip::Skip
 };
 
@@ -42,6 +42,8 @@ pub struct Tui {
 	rendered: Vec<RenderedInfo>,
 	page_constraints: PageConstraints,
 	showing_help_msg: bool,
+	showing_links_menu: bool,
+	selected_link_index: usize,
 	is_kitty: bool,
 	zoom: Option<Zoom>
 }
@@ -98,7 +100,9 @@ pub struct RenderedInfo {
 	// we haven't checked this page yet
 	// Also this isn't the most efficient representation of this value, but it's accurate, so like
 	// whatever I guess
-	num_results: Option<usize>
+	num_results: Option<usize>,
+	// Links detected on this page
+	links: Vec<Link>
 }
 
 #[derive(PartialEq)]
@@ -118,6 +122,8 @@ impl Tui {
 			rendered: vec![],
 			page_constraints: PageConstraints { max_wide, r_to_l },
 			showing_help_msg: false,
+			showing_links_menu: false,
+			selected_link_index: 0,
 			is_kitty,
 			zoom: None
 		}
@@ -157,6 +163,11 @@ impl Tui {
 	) -> KittyDisplay<'s> {
 		if self.showing_help_msg {
 			self.render_help_msg(frame);
+			return KittyDisplay::ClearImages;
+		}
+
+		if self.showing_links_menu {
+			self.render_links_menu(frame);
 			return KittyDisplay::ClearImages;
 		}
 
@@ -318,21 +329,25 @@ impl Tui {
 				self.last_render.unused_width = unused_width;
 				img_area.x += unused_width / 2;
 
-				let to_display = page_widths
-					.into_iter()
-					.enumerate()
-					.filter_map(|(idx, (width, img))| {
-						let maybe_img =
-							Self::render_single_page(frame, img, Rect { width, ..img_area });
-						img_area.x += width;
-						maybe_img.map(|(img, pos)| KittyReadyToDisplay {
+				let mut to_display = Vec::new();
+
+				for (idx, (width, img)) in page_widths.into_iter().enumerate() {
+					let page_rect = Rect { width, ..img_area };
+					let page_num = idx + self.page;
+
+					// Render the page
+					let maybe_img = Self::render_single_page(frame, img, page_rect);
+
+					img_area.x += width;
+					if let Some((img, pos)) = maybe_img {
+						to_display.push(KittyReadyToDisplay {
 							img,
-							page_num: idx + self.page,
+							page_num,
 							pos,
 							display_loc: DisplayLocation::default()
-						})
-					})
-					.collect::<Vec<_>>();
+						});
+					}
+				}
 
 				// we want to set this at the very end so it doesn't get set somewhere halfway through and
 				// then the whole diffing thing messes it up
@@ -410,7 +425,13 @@ impl Tui {
 		self.page = self.page.min(n_pages - 1);
 	}
 
-	pub fn page_ready(&mut self, img: ConvertedImage, page_num: usize, num_results: usize) {
+	pub fn page_ready(
+		&mut self,
+		img: ConvertedImage,
+		page_num: usize,
+		num_results: usize,
+		links: Vec<Link>
+	) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
 		// the last rect marker so that all images are forced to redraw on next render and this one
@@ -432,7 +453,8 @@ impl Tui {
 		// number of pages, so the vec will already be cleared
 		self.rendered[page_num] = RenderedInfo {
 			img: Some(img),
-			num_results: Some(num_results)
+			num_results: Some(num_results),
+			links
 		};
 	}
 
@@ -491,6 +513,10 @@ impl Tui {
 		} else {
 			String::new()
 		};
+
+		// Check if current page has links
+		let has_links = rendered.get(page_num).is_some_and(|r| !r.links.is_empty());
+
 		let bottom_layout = Layout::horizontal([
 			Constraint::Fill(1),
 			Constraint::Length(rendered_str.len() as u16)
@@ -500,35 +526,52 @@ impl Tui {
 		let rendered_span = Span::styled(&rendered_str, Style::new().fg(Color::Cyan));
 		frame.render_widget(rendered_span, bottom_layout[1]);
 
-		let (msg_str, color): (Cow<'_, str>, _) = match bottom_msg {
-			BottomMessage::Help => ("?: Show help page".into(), Color::Blue),
-			BottomMessage::Error(e) => (e.as_str().into(), Color::Red),
-			BottomMessage::Input(input_state) => (
-				match input_state {
+		// Handle different bottom messages and render with appropriate colors
+		match bottom_msg {
+			BottomMessage::Help => {
+				// Create spans with different colors for help message and links info
+				let mut spans = vec![Span::styled(
+					"?: Show help page",
+					Style::new().fg(Color::Blue)
+				)];
+				if has_links {
+					spans.push(Span::styled(" | ", Style::new().fg(Color::DarkGray)));
+					spans.push(Span::styled(
+						format!("Tab: {} links", rendered[page_num].links.len()),
+						Style::new().fg(Color::Yellow)
+					));
+				}
+				let help_line = ratatui::text::Line::from(spans);
+				frame.render_widget(Paragraph::new(help_line), bottom_layout[0]);
+			}
+			BottomMessage::Error(e) => {
+				let span = Span::styled(e.as_str(), Style::new().fg(Color::Red));
+				frame.render_widget(span, bottom_layout[0]);
+			}
+			BottomMessage::Input(input_state) => {
+				let msg_str = match input_state {
 					InputCommand::GoToPage(page) => format!("Go to: {page}"),
 					InputCommand::Search(s) => format!("Search: {s}")
-				}
-				.into(),
-				Color::Blue
-			),
+				};
+				let span = Span::styled(msg_str, Style::new().fg(Color::Blue));
+				frame.render_widget(span, bottom_layout[0]);
+			}
 			BottomMessage::SearchResults(term) => {
 				let num_found = rendered.iter().filter_map(|r| r.num_results).sum::<usize>();
 				let num_searched =
 					rendered.iter().filter(|r| r.num_results.is_some()).count() * 100;
-				(
-					format!(
-						"Results for '{term}': {num_found} (searched: {}%)",
-						num_searched / rendered.len()
-					)
-					.into(),
-					Color::Blue
-				)
+				let msg_str = format!(
+					"Results for '{term}': {num_found} (searched: {}%)",
+					num_searched / rendered.len()
+				);
+				let span = Span::styled(msg_str, Style::new().fg(Color::Blue));
+				frame.render_widget(span, bottom_layout[0]);
 			}
-			BottomMessage::Reloaded => ("Document was reloaded!".into(), Color::Blue)
-		};
-
-		let span = Span::styled(msg_str, Style::new().fg(color));
-		frame.render_widget(span, bottom_layout[0]);
+			BottomMessage::Reloaded => {
+				let span = Span::styled("Document was reloaded!", Style::new().fg(Color::Blue));
+				frame.render_widget(span, bottom_layout[0]);
+			}
+		}
 	}
 
 	pub fn handle_event(&mut self, ev: &Event) -> Option<InputAction> {
@@ -567,6 +610,21 @@ impl Tui {
 						}
 
 						match c {
+							'c' if self.showing_links_menu => {
+								// Copy the selected link URL to clipboard
+								if let Some(rendered_info) = self.rendered.get(self.page) {
+									if let Some(link) =
+										rendered_info.links.get(self.selected_link_index)
+									{
+										// Copy to clipboard using copypasta
+										use copypasta::{ClipboardContext, ClipboardProvider};
+										if let Ok(mut ctx) = ClipboardContext::new() {
+											let _ = ctx.set_contents(link.uri.clone());
+										}
+									}
+								}
+								None
+							}
 							'l' => self.change_page(PageChange::Next, ChangeAmount::Single),
 							'j' => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
 							'h' => self.change_page(PageChange::Prev, ChangeAmount::Single),
@@ -689,15 +747,34 @@ impl Tui {
 					KeyCode::Down => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
 					KeyCode::Left => self.change_page(PageChange::Prev, ChangeAmount::Single),
 					KeyCode::Up => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-					KeyCode::Esc => match (self.showing_help_msg, &self.bottom_msg) {
-						(false, BottomMessage::Help) => Some(InputAction::QuitApp),
+					KeyCode::Esc => match (
+						self.showing_help_msg,
+						self.showing_links_menu,
+						&self.bottom_msg
+					) {
+						(false, false, BottomMessage::Help) => Some(InputAction::QuitApp),
 						_ => {
 							// When we hit escape, we just want to pop off the current message and
 							// show the underlying one.
 							self.set_msg(MessageSetting::Pop);
+							self.showing_help_msg = false;
+							self.showing_links_menu = false;
+							self.selected_link_index = 0; // Reset link selection
+							// Force a full redraw by resetting the cached rect
+							self.last_render.rect = Rect::default();
 							Some(InputAction::Redraw)
 						}
 					},
+					KeyCode::Enter if self.showing_links_menu => {
+						if let Some(rendered_info) = self.rendered.get(self.page) {
+							if let Some(link) = rendered_info.links.get(self.selected_link_index) {
+								if link.uri.starts_with("http") {
+									let _ = open::that(&link.uri);
+								}
+							}
+						}
+						None // Don't redraw, just execute the command
+					}
 					KeyCode::Enter => {
 						let mut default = BottomMessage::default();
 						std::mem::swap(&mut self.bottom_msg, &mut default);
@@ -750,6 +827,35 @@ impl Tui {
 								// search term to '' so that they can re-render the pages wthout
 								// the highlighting
 								Some(InputAction::Search(term))
+							}
+						}
+					}
+					KeyCode::Tab => {
+						if self.showing_links_menu {
+							// Cycle through links when menu is open
+							if let Some(rendered_info) = self.rendered.get(self.page) {
+								if !rendered_info.links.is_empty() {
+									self.selected_link_index =
+										(self.selected_link_index + 1) % rendered_info.links.len();
+									Some(InputAction::Redraw)
+								} else {
+									None
+								}
+							} else {
+								None
+							}
+						} else {
+							// Open links menu when not already open
+							if let Some(rendered_info) = self.rendered.get(self.page) {
+								if !rendered_info.links.is_empty() {
+									self.showing_links_menu = true;
+									self.selected_link_index = 0;
+									Some(InputAction::Redraw)
+								} else {
+									None
+								}
+							} else {
+								None
 							}
 						}
 					}
@@ -810,6 +916,7 @@ impl Tui {
 			// mark that we need to re-render the images
 			self.last_render.rect = Rect::default();
 			self.page = page;
+			self.selected_link_index = 0; // Reset link selection when changing pages
 		}
 	}
 
@@ -875,6 +982,77 @@ impl Tui {
 
 		frame.render_widget(block, block_area[1]);
 		frame.render_widget(help_span, block_inner);
+	}
+
+	pub fn render_links_menu(&self, frame: &mut Frame<'_>) {
+		let frame_area = frame.area();
+		frame.render_widget(Clear, frame_area);
+
+		let block = Block::new()
+			.title("Links in Current Page (Tab: cycle, Enter: open, c: copy, Esc: close)")
+			.padding(Padding::proportional(1))
+			.borders(Borders::ALL)
+			.border_set(border::ROUNDED)
+			.border_style(Color::Blue);
+
+		// Get links for the current page
+		let links_text = if let Some(rendered_info) = self.rendered.get(self.page) {
+			if rendered_info.links.is_empty() {
+				"No links found on this page.".to_string()
+			} else {
+				let max_link_width = 70; // Reserve space for numbering and selection indicator
+				let mut text = String::new();
+				for (i, link) in rendered_info.links.iter().enumerate() {
+					let truncated_uri = if link.uri.len() > max_link_width {
+						format!("{}...", &link.uri[..max_link_width])
+					} else {
+						link.uri.clone()
+					};
+
+					let prefix = if i == self.selected_link_index {
+						format!("> {}. ", i + 1) // Selected item gets ">" prefix
+					} else {
+						format!("  {}. ", i + 1) // Normal items get spaces
+					};
+
+					text.push_str(&format!("{prefix}{truncated_uri}\n"));
+				}
+				text
+			}
+		} else {
+			"Page not yet loaded.".to_string()
+		};
+
+		let links_span = Paragraph::new(links_text.as_str()).wrap(Wrap { trim: false });
+
+		let max_w: u16 = links_text
+			.lines()
+			.map(str::len)
+			.max()
+			.unwrap_or(30)
+			.min(80)
+			.try_into()
+			.unwrap_or(30);
+
+		let layout = Layout::horizontal([
+			Constraint::Fill(1),
+			Constraint::Length(max_w + 6),
+			Constraint::Fill(1)
+		])
+		.split(frame_area);
+
+		let num_lines = links_text.lines().count().max(3);
+		let block_area = Layout::vertical([
+			Constraint::Fill(1),
+			Constraint::Length(u16::try_from(num_lines).unwrap_or(10) + 4),
+			Constraint::Fill(1)
+		])
+		.split(layout[1]);
+
+		let block_inner = block.inner(block_area[1]);
+
+		frame.render_widget(block, block_area[1]);
+		frame.render_widget(links_span, block_inner);
 	}
 }
 

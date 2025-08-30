@@ -41,7 +41,8 @@ pub enum RenderInfo {
 pub struct PageInfo {
 	pub img_data: ImageData,
 	pub page_num: usize,
-	pub result_rects: Vec<HighlightRect>
+	pub result_rects: Vec<HighlightRect>,
+	pub links: Vec<Link>
 }
 
 #[derive(Clone)]
@@ -327,7 +328,8 @@ pub fn start_rendering(
 								cell_h: (ctx.surface_h / f32::from(col_h)) as u16
 							},
 							page_num,
-							result_rects: ctx.result_rects
+							result_rects: ctx.result_rects,
+							links: ctx.links
 						})))?;
 					}
 					// And if we got an error, then obviously we need to propagate that
@@ -443,7 +445,8 @@ struct RenderedContext {
 	pixmap: Pixmap,
 	surface_w: f32,
 	surface_h: f32,
-	result_rects: Vec<HighlightRect>
+	result_rects: Vec<HighlightRect>,
+	links: Vec<Link>
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -512,11 +515,14 @@ fn render_single_page_to_ctx(
 		})
 		.collect::<Vec<_>>();
 
+	let links = extract_page_links(page)?;
+
 	Ok(RenderedContext {
 		pixmap,
 		surface_w,
 		surface_h,
-		result_rects
+		result_rects,
+		links
 	})
 }
 
@@ -526,6 +532,12 @@ pub struct HighlightRect {
 	pub ul_y: u32,
 	pub lr_x: u32,
 	pub lr_y: u32
+}
+
+#[derive(Clone, Debug)]
+pub struct Link {
+	pub uri: String,
+	pub target_page: Option<u32>
 }
 
 #[inline]
@@ -561,6 +573,30 @@ fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::
 			})?;
 			Ok(count)
 		})
+}
+
+fn extract_page_links(page: &Page) -> Result<Vec<Link>, mupdf::error::Error> {
+	let links = page.links()?;
+	let mut unique_links = Vec::new();
+	let mut seen_uris = std::collections::HashSet::new();
+
+	for link in links {
+		// Only include HTTP/HTTPS URLs, skip internal links and empty URIs
+		if link.uri.starts_with("http") {
+			let uri = link.uri.clone();
+
+			// Only add if we haven't seen this URI before
+			if !seen_uris.contains(&uri) {
+				seen_uris.insert(uri.clone());
+
+				let target_page = Some(link.page);
+
+				unique_links.push(Link { uri, target_page });
+			}
+		}
+	}
+
+	Ok(unique_links)
 }
 
 struct PopOnNext<'a> {

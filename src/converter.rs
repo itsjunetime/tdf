@@ -16,7 +16,7 @@ use ratatui_image::{
 use rayon::iter::ParallelIterator;
 
 use crate::{
-	renderer::{PageInfo, RenderError, fill_default},
+	renderer::{Link, PageInfo, RenderError, fill_default},
 	skip::InterleavedAroundWithMax
 };
 
@@ -54,7 +54,8 @@ impl ConvertedImage {
 pub struct ConvertedPage {
 	pub page: ConvertedImage,
 	pub num: usize,
-	pub num_results: usize
+	pub num_results: usize,
+	pub links: Vec<Link>
 }
 
 pub enum ConverterMsg {
@@ -174,7 +175,8 @@ pub async fn run_conversion_loop(
 		Ok(Some(ConvertedPage {
 			page: txt_img,
 			num: page_info.page_num,
-			num_results: page_info.result_rects.len()
+			num_results: page_info.result_rects.len(),
+			links: page_info.links.clone()
 		}))
 	}
 

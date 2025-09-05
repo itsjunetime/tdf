@@ -2,7 +2,7 @@ use std::{collections::VecDeque, num::NonZeroUsize, thread::sleep, time::Duratio
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use mupdf::{
-	Colorspace, Document, Matrix, Page, Pixmap, Quad, TextPageOptions, text_page::SearchHitResponse
+	Colorspace, Document, Matrix, Page, Pixmap, Quad, TextPageFlags, text_page::SearchHitResponse
 };
 use ratatui::layout::Rect;
 
@@ -520,7 +520,7 @@ fn render_single_page_to_ctx(
 	})
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HighlightRect {
 	pub ul_x: u32,
 	pub ul_y: u32,
@@ -536,7 +536,7 @@ fn search_page(
 ) -> Result<Vec<Quad>, mupdf::error::Error> {
 	search_term
 		.map(|term| {
-			page.to_text_page(TextPageOptions::empty())
+			page.to_text_page(TextPageFlags::empty())
 				.and_then(|page| {
 					let mut v = Vec::with_capacity(trusted_search_results);
 					page.search_cb(term, &mut v, |v, results| {
@@ -552,7 +552,7 @@ fn search_page(
 
 #[inline]
 fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::error::Error> {
-	page.to_text_page(TextPageOptions::empty())
+	page.to_text_page(TextPageFlags::empty())
 		.and_then(|page| {
 			let mut count = 0;
 			page.search_cb(search_term, &mut count, |count, results| {

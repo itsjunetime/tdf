@@ -250,9 +250,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bindgen"
-version = "0.71.1"
+version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
+checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
 dependencies = [
  "bitflags 2.9.4",
  "cexpr",
@@ -1889,13 +1889,11 @@ dependencies = [
 [[package]]
 name = "mupdf"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a6499267155b9ae03ff8e53c456d0bfff988b2647d62ff1df038f39ebe93a0c"
+source = "git+https://github.com/messense/mupdf-rs.git?rev=2e0fae910fac8048c7008211fc4d3b9f5d227a07#2e0fae910fac8048c7008211fc4d3b9f5d227a07"
 dependencies = [
  "bitflags 2.9.4",
  "font-kit",
  "mupdf-sys",
- "num_enum",
  "once_cell",
  "zerocopy",
 ]
@@ -1903,8 +1901,7 @@ dependencies = [
 [[package]]
 name = "mupdf-sys"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13e9a0d4e844ab50315d43312f3d62f72c77205b07c8ee21cbd4b52bdc2a9910"
+source = "git+https://github.com/messense/mupdf-rs.git?rev=2e0fae910fac8048c7008211fc4d3b9f5d227a07#2e0fae910fac8048c7008211fc4d3b9f5d227a07"
 dependencies = [
  "bindgen",
  "cc",
@@ -2048,28 +2045,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "num_enum"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a973b4e44ce6cad84ce69d797acf9a044532e4184c4f267913d1b546a0727b7a"
-dependencies = [
- "num_enum_derive",
- "rustversion",
-]
-
-[[package]]
-name = "num_enum_derive"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77e878c846a8abae00dd069496dbe8751b16ac1c3d6bd2a7283a938e8228f90d"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.106",
 ]
 
 [[package]]
@@ -2368,15 +2343,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-crate"
-version = "3.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edce586971a4dfaa28950c6f18ed55e0406c1ab88bbce2c6f6293a7aaba73d35"
-dependencies = [
- "toml_edit",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2551,6 +2517,7 @@ dependencies = [
 [[package]]
 name = "ratatui-image"
 version = "8.0.1"
+source = "git+https://github.com/itsjunetime/ratatui-image.git?branch=vb64_on_personal#fe3d0b992bcfafa671c5374a94503831baf165ca"
 dependencies = [
  "base64 0.22.1",
  "icy_sixel",
@@ -4044,9 +4011,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.45.0"
+version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "052283831dbae3d879dc7f51f3d92703a316ca49f91540417d38591826127814"
+checksum = "5c573471f125075647d03df72e026074b7203790d41351cd6edc96f46bcccd36"
 
 [[package]]
 name = "xflags"

@@ -26,6 +26,7 @@ pub enum MaybeTransferred {
 	Transferred(kittage::ImageId)
 }
 
+#[derive(Debug)]
 pub enum ConvertedImage {
 	Generic(Protocol),
 	Kitty {
@@ -167,6 +168,8 @@ pub async fn run_conversion_loop(
 					})?
 			)
 		};
+
+		log::debug!("got converted page for num {} with results {:?}", page_info.page_num, page_info.result_rects);
 
 		// update the iteration to the iteration that we stole this image from
 		*iteration = new_iter;

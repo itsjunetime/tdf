@@ -536,15 +536,14 @@ fn search_page(
 ) -> Result<Vec<Quad>, mupdf::error::Error> {
 	search_term
 		.map(|term| {
-			page.to_text_page(TextPageFlags::empty())
-				.and_then(|page| {
-					let mut v = Vec::with_capacity(trusted_search_results);
-					page.search_cb(term, &mut v, |v, results| {
-						v.extend(results.iter().cloned());
-						SearchHitResponse::ContinueSearch
-					})
-					.map(|_| v)
+			page.to_text_page(TextPageFlags::empty()).and_then(|page| {
+				let mut v = Vec::with_capacity(trusted_search_results);
+				page.search_cb(term, &mut v, |v, results| {
+					v.extend(results.iter().cloned());
+					SearchHitResponse::ContinueSearch
 				})
+				.map(|_| v)
+			})
 		})
 		.transpose()
 		.map(Option::unwrap_or_default)
@@ -552,15 +551,14 @@ fn search_page(
 
 #[inline]
 fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::error::Error> {
-	page.to_text_page(TextPageFlags::empty())
-		.and_then(|page| {
-			let mut count = 0;
-			page.search_cb(search_term, &mut count, |count, results| {
-				*count += results.len();
-				SearchHitResponse::ContinueSearch
-			})?;
-			Ok(count)
-		})
+	page.to_text_page(TextPageFlags::empty()).and_then(|page| {
+		let mut count = 0;
+		page.search_cb(search_term, &mut count, |count, results| {
+			*count += results.len();
+			SearchHitResponse::ContinueSearch
+		})?;
+		Ok(count)
+	})
 }
 
 struct PopOnNext<'a> {

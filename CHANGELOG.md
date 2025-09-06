@@ -1,6 +1,9 @@
 # Unreleased
 
+- Fix issue with some terminals hanging on startup
+- Fix issues with some iterm2-backend terminals not displaying anything
 - Allow using ctrl+scroll to zoom in/out while zoomed using kitty backend
+- (Internal) run CI with `--locked` flag to ensure lockfile is always in-sync
 
 # v0.4.2
 

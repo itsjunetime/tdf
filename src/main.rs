@@ -1,9 +1,11 @@
-use core::error::Error;
+use core::{
+	error::Error,
+	num::{NonZeroU32, NonZeroUsize}
+};
 use std::{
 	borrow::Cow,
 	ffi::OsString,
-	io::{BufReader, Read, Stdout, stdout},
-	num::{NonZeroU32, NonZeroUsize},
+	io::{BufReader, Read, Stdout, Write, stdout},
 	path::PathBuf
 };
 
@@ -54,8 +56,27 @@ impl std::fmt::Debug for WrappedErr {
 
 impl std::error::Error for WrappedErr {}
 
+fn reset_term() {
+	_ = execute!(
+		std::io::stdout(),
+		LeaveAlternateScreen,
+		crossterm::cursor::Show,
+		crossterm::event::DisableMouseCapture
+	)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), WrappedErr> {
+	inner_main().await.inspect_err(|_| reset_term())
+}
+
+async fn inner_main() -> Result<(), WrappedErr> {
+	let hook = std::panic::take_hook();
+	std::panic::set_hook(Box::new(move |info| {
+		reset_term();
+		hook(info);
+	}));
+
 	#[cfg(feature = "tracing")]
 	console_subscriber::init();
 
@@ -172,14 +193,39 @@ async fn main() -> Result<(), WrappedErr> {
 		window_size.height = h;
 	}
 
+	let cell_height_px = window_size.height / window_size.rows;
+	let cell_width_px = window_size.width / window_size.columns;
+
+	execute!(
+		std::io::stdout(),
+		EnterAlternateScreen,
+		crossterm::cursor::Hide,
+		crossterm::event::EnableMouseCapture
+	)
+	.map_err(|e| {
+		WrappedErr(
+			format!(
+				"Couldn't enter the alternate screen and hide the cursor for proper presentation: {e}"
+			)
+			.into()
+		)
+	})?;
+
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,
 	// it messes up something with user input. Input never makes it to the crossterm thing
 	let picker = Picker::from_query_stdio()
-		.map_err(|e| WrappedErr(match e {
-			ratatui_image::errors::Errors::NoFontSize =>
-				"Unable to detect your terminal's font size; this is an issue with your terminal emulator.\nPlease use a different terminal emulator or report this bug to tdf.".into(),
-			e => format!("Couldn't get the necessary information to set up images: {e}").into()
-		}))?;
+		.or_else(|e| match e {
+			ratatui_image::errors::Errors::NoFontSize if
+				window_size.width != 0
+				&& window_size.height != 0
+				&& window_size.columns != 0
+				&& window_size.rows != 0
+					=> Ok(Picker::from_fontsize((cell_width_px, cell_height_px))),
+			ratatui_image::errors::Errors::NoFontSize => Err(WrappedErr(
+				"Unable to detect your terminal's font size; this is an issue with your terminal emulator.\nPlease use a different terminal emulator or report this bug to tdf.".into()
+			)),
+			e => Err(WrappedErr(format!("Couldn't get the necessary information to set up images: {e}").into()))
+		})?;
 
 	// then we want to spawn off the rendering task
 	// We need to use the thread::spawn API so that this exists in a thread not owned by tokio,
@@ -189,8 +235,6 @@ async fn main() -> Result<(), WrappedErr> {
 		.and_then(NonZeroUsize::new)
 		.map_or(PrerenderLimit::All, PrerenderLimit::Limited);
 
-	let cell_height_px = window_size.height / window_size.rows;
-	let cell_width_px = window_size.width / window_size.columns;
 	std::thread::spawn(move || {
 		renderer::start_rendering(
 			&file_path,
@@ -236,20 +280,6 @@ async fn main() -> Result<(), WrappedErr> {
 	})?;
 	term.skip_diff(true);
 
-	execute!(
-		term.backend_mut(),
-		EnterAlternateScreen,
-		crossterm::cursor::Hide,
-		crossterm::event::EnableMouseCapture
-	)
-	.map_err(|e| {
-		WrappedErr(
-			format!(
-				"Couldn't enter the alternate screen and hide the cursor for proper presentation: {e}"
-			)
-			.into()
-		)
-	})?;
 	enable_raw_mode().map_err(|e| {
 		WrappedErr(
 			format!("Can't enable raw mode, which is necessary to receive input: {e}").into()
@@ -478,6 +508,10 @@ fn parse_color_to_i32(cs: &str) -> Result<i32, csscolorparser::ParseColorError> 
 }
 
 fn get_font_size_through_stdio() -> Result<(u16, u16), WrappedErr> {
+	// send the command code to get the terminal window size
+	print!("\x1b[14t");
+	std::io::stdout().flush().unwrap();
+
 	// we need to enable raw mode here since this bit of output won't print a newline; it'll
 	// just print the info it wants to tell us. So we want to get all characters as they come
 	enable_raw_mode().map_err(|e| {

@@ -427,8 +427,6 @@ impl Tui {
 			}
 		}
 
-		log::debug!("tui got page {page_num} ready with img {img:#?}");
-
 		// We always just set this here because we handle reloading in the `set_n_pages` function.
 		// If the document was reloaded, then It'll have the `set_n_pages` called to set the new
 		// number of pages, so the vec will already be cleared

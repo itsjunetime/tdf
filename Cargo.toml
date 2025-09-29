@@ -57,8 +57,7 @@ inherits = "release"
 lto = "fat"
 
 [features]
-default = ["nightly"]
-nightly = ["ratatui-image/vb64"]
+default = []
 tracing = ["tokio/tracing", "dep:console-subscriber"]
 epub = ["mupdf/epub"]
 cbz = ["mupdf/cbz"]

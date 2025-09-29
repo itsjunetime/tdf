@@ -1,5 +1,7 @@
 # Unreleased
 
+- Switched simd base64 crate for one that works on stable (from `vb64` to `base64_simd`)
+
 # v0.4.3
 
 - Fix issue with some terminals hanging on startup

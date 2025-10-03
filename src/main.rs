@@ -3,7 +3,6 @@ use core::{
 	num::{NonZeroU32, NonZeroUsize}
 };
 use std::{
-	borrow::Cow,
 	ffi::OsString,
 	io::{BufReader, Read, Stdout, Write, stdout},
 	path::PathBuf
@@ -32,30 +31,13 @@ use ratatui_image::{
 	picker::{Picker, ProtocolType}
 };
 use tdf::{
-	PrerenderLimit,
-	config::DocumentHistoryConfig,
+	PrerenderLimit, WrappedErr,
+	config::DocumentHistory,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
-
-// Dummy struct for easy errors in main
-struct WrappedErr(Cow<'static, str>);
-
-impl std::fmt::Display for WrappedErr {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.0)
-	}
-}
-
-impl std::fmt::Debug for WrappedErr {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		std::fmt::Display::fmt(self, f)
-	}
-}
-
-impl std::error::Error for WrappedErr {}
 
 fn reset_term() {
 	_ = execute!(
@@ -274,12 +256,17 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		flags.r_to_l.unwrap_or_default(),
 		is_kitty
 	);
-	let mut document_history_config = DocumentHistoryConfig::load();
-	if let Some(last_page) = document_history_config
+	let mut document_history = DocumentHistory::load().unwrap_or_else(|e| {
+		WrappedErr(format!("Couldn't initialize document history: {e}").into());
+		DocumentHistory::default()
+	});
+	let restored_page = document_history
 		.last_pages_opened
 		.get(&path.to_string_lossy().to_string())
-	{
-		tui.set_page(*last_page);
+		.copied();
+
+	if let Some(page) = restored_page {
+		tui.set_page(page);
 	}
 
 	let backend = CrosstermBackend::new(std::io::stdout());
@@ -321,6 +308,19 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let tui_rx = tui_rx.into_stream();
 	let from_converter = from_converter.into_stream();
 
+	if let Some(page) = restored_page {
+		to_renderer
+			.send(RenderNotif::JumpToPage(page))
+			.map_err(|e| {
+				WrappedErr(format!("Couldn't tell renderer to jump to restored page: {e}").into())
+			})?;
+		to_converter
+			.send(ConverterMsg::GoToPage(page))
+			.map_err(|e| {
+				WrappedErr(format!("Couldn't tell converter to jump to restored page: {e}").into())
+			})?;
+	}
+
 	enter_redraw_loop(
 		ev_stream,
 		to_renderer,
@@ -354,10 +354,13 @@ async fn inner_main() -> Result<(), WrappedErr> {
 
 	drop(maybe_logger);
 
-	document_history_config
+	document_history
 		.last_pages_opened
 		.insert(path.to_string_lossy().to_string(), tui.page);
-	document_history_config.save();
+
+	if let Err(e) = document_history.save() {
+		WrappedErr(format!("Failed to save last opened page: {e}").into());
+	}
 
 	Ok(())
 }

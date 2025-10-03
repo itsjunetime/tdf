@@ -43,8 +43,7 @@ rayon = { version = "*", default-features = false }
 # kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
 kittage = { git = "https://github.com/itsjunetime/kittage.git", features = ["crossterm-tokio", "image-crate", "log"] }
 memmap2 = "*"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+bitcode = "0.6"
 dirs = "5.0"
 
 # logging

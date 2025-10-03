@@ -1,36 +1,41 @@
 use std::{collections::HashMap, fs};
 
+use bitcode::{Decode, Encode};
 use dirs::config_dir;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Default)]
-pub struct DocumentHistoryConfig {
+use crate::WrappedErr;
+
+#[derive(Decode, Encode, Default)]
+pub struct DocumentHistory {
 	pub last_pages_opened: HashMap<String, usize>
 }
 
-impl DocumentHistoryConfig {
-	pub fn load() -> Self {
-		if let Some(path) = Self::get_config_path() {
-			if let Ok(data) = fs::read_to_string(path) {
-				if let Ok(cfg) = serde_json::from_str(&data) {
-					return cfg;
-				}
-			}
-		}
-		Self::default()
+impl DocumentHistory {
+	pub fn load() -> Result<Self, WrappedErr> {
+		Self::get_history_path()
+			.ok_or_else(|| WrappedErr("Could not determine history directory".into()))
+			.and_then(|path| {
+				fs::read(path)
+					.map_err(|e| WrappedErr(format!("Failed to read history file: {e}").into()))
+			})
+			.and_then(|data| {
+				bitcode::decode(&data)
+					.map_err(|e| WrappedErr(format!("Failed to decode history file: {e}").into()))
+			})
 	}
 
-	pub fn save(&self) {
-		if let Some(path) = Self::get_config_path() {
-			if let Ok(data) = serde_json::to_string_pretty(self) {
-				let _ = fs::write(path, data);
-			}
-		}
+	pub fn save(&self) -> Result<(), WrappedErr> {
+		let path = Self::get_history_path()
+			.ok_or_else(|| WrappedErr("Could not determine history directory".into()))?;
+		let data = bitcode::encode(self);
+		fs::write(path, data)
+			.map_err(|e| WrappedErr(format!("Failed to write history file: {e}").into()))?;
+		Ok(())
 	}
 
-	fn get_config_path() -> Option<std::path::PathBuf> {
+	fn get_history_path() -> Option<std::path::PathBuf> {
 		config_dir().map(|mut dir| {
-			dir.push("tdf.config.json");
+			dir.push("tdf.history.bin");
 			dir
 		})
 	}
@@ -40,29 +45,28 @@ impl DocumentHistoryConfig {
 mod tests {
 	use std::fs;
 
-	use serde_json;
 	use tempfile::tempdir;
 
 	use super::*;
 
 	#[test]
-	fn test_default_config() {
-		let config = DocumentHistoryConfig::default();
-		assert!(config.last_pages_opened.is_empty());
+	fn test_default_history() {
+		let history = DocumentHistory::default();
+		assert!(history.last_pages_opened.is_empty());
 	}
 
 	#[test]
-	fn test_config_serialization() {
-		let mut config = DocumentHistoryConfig::default();
-		config
+	fn test_history_serialization() {
+		let mut history = DocumentHistory::default();
+		history
 			.last_pages_opened
 			.insert("/path/to/file1.pdf".to_string(), 5);
-		config
+		history
 			.last_pages_opened
 			.insert("/path/to/file2.pdf".to_string(), 10);
 
-		let json = serde_json::to_string(&config).unwrap();
-		let deserialized: DocumentHistoryConfig = serde_json::from_str(&json).unwrap();
+		let encoded = bitcode::encode(&history);
+		let deserialized: DocumentHistory = bitcode::decode(&encoded).unwrap();
 
 		assert_eq!(
 			deserialized.last_pages_opened.get("/path/to/file1.pdf"),
@@ -75,92 +79,70 @@ mod tests {
 	}
 
 	#[test]
-	fn test_config_with_temp_dir() {
+	fn test_history_with_temp_dir() {
 		let temp_dir = tempdir().unwrap();
-		let config_path = temp_dir.path().join("tdf.config.json");
+		let history_path = temp_dir.path().join("tdf.history.bin");
 
-		let mut config = DocumentHistoryConfig::default();
-		config
+		let mut history = DocumentHistory::default();
+		history
 			.last_pages_opened
 			.insert("/test/file.pdf".to_string(), 42);
 
-		let json = serde_json::to_string_pretty(&config).unwrap();
-		fs::write(&config_path, json).unwrap();
+		let encoded = bitcode::encode(&history);
+		fs::write(&history_path, encoded).unwrap();
 
-		let data = fs::read_to_string(&config_path).unwrap();
-		let loaded_config: DocumentHistoryConfig = serde_json::from_str(&data).unwrap();
+		let data = fs::read(&history_path).unwrap();
+		let loaded_history: DocumentHistory = bitcode::decode(&data).unwrap();
 
 		assert_eq!(
-			loaded_config.last_pages_opened.get("/test/file.pdf"),
+			loaded_history.last_pages_opened.get("/test/file.pdf"),
 			Some(&42)
 		);
 	}
 
 	#[test]
-	fn test_load_with_invalid_json() {
+	fn test_load_with_invalid_binary() {
 		let temp_dir = tempdir().unwrap();
-		let config_path = temp_dir.path().join("tdf.config.json");
+		let history_path = temp_dir.path().join("tdf.history.bin");
 
-		fs::write(&config_path, "{ invalid json }").unwrap();
+		fs::write(&history_path, b"invalid binary data").unwrap();
 
-		let data = fs::read_to_string(&config_path).unwrap();
-		let result: Result<DocumentHistoryConfig, _> = serde_json::from_str(&data);
+		let data = fs::read(&history_path).unwrap();
+		let result: Result<DocumentHistory, _> = bitcode::decode(&data);
 		assert!(result.is_err());
 	}
 
 	#[test]
-	fn test_config_with_empty_file() {
+	fn test_history_with_empty_file() {
 		let temp_dir = tempdir().unwrap();
-		let config_path = temp_dir.path().join("tdf.config.json");
+		let history_path = temp_dir.path().join("tdf.history.bin");
 
-		fs::write(&config_path, "").unwrap();
+		fs::write(&history_path, b"").unwrap();
 
-		let data = fs::read_to_string(&config_path).unwrap();
-		let result: Result<DocumentHistoryConfig, _> = serde_json::from_str(&data);
+		let data = fs::read(&history_path).unwrap();
+		let result: Result<DocumentHistory, _> = bitcode::decode(&data);
 		assert!(result.is_err());
 	}
 
 	#[test]
-	fn test_config_with_malformed_json() {
+	fn test_history_save_and_load() {
 		let temp_dir = tempdir().unwrap();
-		let config_path = temp_dir.path().join("tdf.config.json");
+		let test_history_path = temp_dir.path().join("tdf.history.bin");
 
-		fs::write(&config_path, "{ invalid json }").unwrap();
-
-		let data = fs::read_to_string(&config_path).unwrap();
-		let result: Result<DocumentHistoryConfig, _> = serde_json::from_str(&data);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn test_config_save_and_load() {
-		let temp_dir = tempdir().unwrap();
-		let test_config_path = temp_dir.path().join("tdf.config.json");
-
-		let mut config = DocumentHistoryConfig::default();
-		config
+		let mut history = DocumentHistory::default();
+		history
 			.last_pages_opened
 			.insert("/test/file.pdf".to_string(), 123);
 
-		let json = serde_json::to_string_pretty(&config).unwrap();
-		fs::write(&test_config_path, json).unwrap();
+		let encoded = bitcode::encode(&history);
+		fs::write(&test_history_path, encoded).unwrap();
 
-		let data = fs::read_to_string(&test_config_path).unwrap();
-		let loaded_config: DocumentHistoryConfig = serde_json::from_str(&data).unwrap();
+		let data = fs::read(&test_history_path).unwrap();
+		let loaded_history: DocumentHistory = bitcode::decode(&data).unwrap();
 
 		assert_eq!(
-			loaded_config.last_pages_opened.get("/test/file.pdf"),
+			loaded_history.last_pages_opened.get("/test/file.pdf"),
 			Some(&123)
 		);
-	}
-
-	#[test]
-	fn test_load_method_with_real_config() {
-		// This test verifies that the load() method works correctly
-		// It will either load an existing config or return default
-		DocumentHistoryConfig::load();
-		// The config should be valid (either loaded from file or default)
-		// We can't assert specific values since we don't know what's in the real config
-		assert!(true); // Just verify it doesn't panic
 	}
 }

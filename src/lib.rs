@@ -1,7 +1,22 @@
-use std::num::NonZeroUsize;
+use std::{borrow::Cow, num::NonZeroUsize};
 
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+pub struct WrappedErr(pub Cow<'static, str>);
+
+impl std::fmt::Display for WrappedErr {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
+impl std::fmt::Debug for WrappedErr {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		std::fmt::Display::fmt(self, f)
+	}
+}
+
+impl std::error::Error for WrappedErr {}
 
 #[derive(PartialEq)]
 pub enum PrerenderLimit {

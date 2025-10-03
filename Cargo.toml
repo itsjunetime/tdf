@@ -43,6 +43,8 @@ rayon = { version = "*", default-features = false }
 # kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
 kittage = { git = "https://github.com/itsjunetime/kittage.git", features = ["crossterm-tokio", "image-crate", "log"] }
 memmap2 = "*"
+bitcode = "0.6"
+dirs = "5.0"
 
 # logging
 log = "0.4.27"
@@ -65,6 +67,7 @@ cbz = ["mupdf/cbz"]
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["async_tokio"] }
 cpuprofiler = "0.0.4"
+tempfile = "3.0"
 
 [[bench]]
 name = "rendering"

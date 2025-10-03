@@ -265,10 +265,6 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		.get(&path.to_string_lossy().to_string())
 		.copied();
 
-	if let Some(page) = restored_page {
-		tui.set_page(page);
-	}
-
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend).map_err(|e| {
 		WrappedErr(format!("Couldn't set up crossterm's terminal backend: {e}").into())
@@ -309,6 +305,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let from_converter = from_converter.into_stream();
 
 	if let Some(page) = restored_page {
+		tui.set_page(page);
 		to_renderer
 			.send(RenderNotif::JumpToPage(page))
 			.map_err(|e| {

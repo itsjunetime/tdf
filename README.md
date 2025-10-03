@@ -16,7 +16,9 @@ Designed to be performant, very responsive, and work well with even very large P
 ## Installation
 
 1. Get the rust toolchain from [rustup.rs](https://rustup.rs)
-2. Run `rustup install nightly && cargo +nightly install --git https://github.com/itsjunetime/tdf.git`
+2. Run `cargo install --git https://github.com/itsjunetime/tdf.git`
+
+If you want to use this with `epub`s or `cbz`s, add `--features epub` or `--features cbz` to the command line (or `--features cbz,epub` for both)
 
 ## To Build
 First, you need to install the system dependencies. This will generally only include `libfontconfig` and `clang`. If you're on linux, these will probably show up in your package manager as something like `libfontconfig1-devel` or `libfontconfig-dev` and just `clang`.
@@ -25,7 +27,7 @@ If it turns out that you're missing one of these, it will fail to compile and te
 
 1. Get the rust toolchain from [rustup.rs](https://rustup.rs)
 2. Clone the repo and `cd` into it
-3. Run `cargo +nightly build --release`
+3. Run `cargo build --release`
 
 The binary should then be found at `./target/release/tdf`.
 

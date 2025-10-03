@@ -31,12 +31,12 @@ jobs:
     - name: Install clippy and fmt
       run: rustup component add clippy rustfmt
     - name: Clippy
-      run: cargo clippy -- -D warnings
+      run: cargo clippy --locked -- -D warnings
     - name: Tests
-      run: cargo test
+      run: cargo test --locked
     - name: Check fmt
       run: cargo fmt -- --check
-    - name: Run tests
-      run: cargo test --benches -- adobe_example
+    - name: Run benchmarks as tests
+      run: cargo test --locked --benches -- adobe_example
     - name: Build
-      run: cargo build
+      run: cargo build --locked

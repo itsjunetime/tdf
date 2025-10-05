@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use bitcode::{Decode, Encode};
 use dirs::config_dir;
@@ -12,32 +12,24 @@ pub struct DocumentHistory {
 
 impl DocumentHistory {
 	pub fn load() -> Result<Self, WrappedErr> {
-		Self::get_history_path()
-			.ok_or_else(|| WrappedErr("Could not determine history directory".into()))
-			.and_then(|path| {
-				fs::read(path)
-					.map_err(|e| WrappedErr(format!("Failed to read history file: {e}").into()))
-			})
-			.and_then(|data| {
-				bitcode::decode(&data)
-					.map_err(|e| WrappedErr(format!("Failed to decode history file: {e}").into()))
-			})
+		let path = Self::history_path()?;
+		let data = fs::read(path)
+			.map_err(|e| WrappedErr(format!("Failed to read history file: {e}").into()))?;
+		bitcode::decode(&data)
+			.map_err(|e| WrappedErr(format!("Failed to decode history file: {e}").into()))
 	}
 
 	pub fn save(&self) -> Result<(), WrappedErr> {
-		let path = Self::get_history_path()
-			.ok_or_else(|| WrappedErr("Could not determine history directory".into()))?;
-		let data = bitcode::encode(self);
-		fs::write(path, data)
+		let path = Self::history_path()?;
+		fs::write(path, bitcode::encode(self))
 			.map_err(|e| WrappedErr(format!("Failed to write history file: {e}").into()))?;
 		Ok(())
 	}
 
-	fn get_history_path() -> Option<std::path::PathBuf> {
-		config_dir().map(|mut dir| {
-			dir.push("tdf.history.bin");
-			dir
-		})
+	fn history_path() -> Result<PathBuf, WrappedErr> {
+		config_dir()
+			.map(|p| p.join("tdf.history.bin"))
+			.ok_or_else(|| WrappedErr("Could not determine history directory".into()))
 	}
 }
 

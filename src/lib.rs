@@ -24,8 +24,8 @@ pub enum PrerenderLimit {
 	Limited(NonZeroUsize)
 }
 
-pub mod config;
 pub mod converter;
+pub mod history;
 pub mod kitty;
 pub mod renderer;
 pub mod skip;

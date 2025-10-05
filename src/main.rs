@@ -32,8 +32,8 @@ use ratatui_image::{
 };
 use tdf::{
 	PrerenderLimit, WrappedErr,
-	config::DocumentHistory,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
+	history::DocumentHistory,
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}

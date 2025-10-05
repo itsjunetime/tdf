@@ -3,7 +3,6 @@ use core::{
 	num::{NonZeroU32, NonZeroUsize}
 };
 use std::{
-	borrow::Cow,
 	ffi::OsString,
 	io::{BufReader, Read, Stdout, Write, stdout},
 	path::PathBuf
@@ -32,29 +31,13 @@ use ratatui_image::{
 	picker::{Picker, ProtocolType}
 };
 use tdf::{
-	PrerenderLimit,
+	PrerenderLimit, WrappedErr,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
+	history::DocumentHistory,
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
-
-// Dummy struct for easy errors in main
-struct WrappedErr(Cow<'static, str>);
-
-impl std::fmt::Display for WrappedErr {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.0)
-	}
-}
-
-impl std::fmt::Debug for WrappedErr {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		std::fmt::Display::fmt(self, f)
-	}
-}
-
-impl std::error::Error for WrappedErr {}
 
 fn reset_term() {
 	_ = execute!(
@@ -267,12 +250,20 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		|| "Unknown file".into(),
 		|n| n.to_string_lossy().to_string()
 	);
-	let tui = Tui::new(
+	let mut tui = Tui::new(
 		file_name,
 		flags.max_wide,
 		flags.r_to_l.unwrap_or_default(),
 		is_kitty
 	);
+	let mut document_history = DocumentHistory::load().unwrap_or_else(|e| {
+		WrappedErr(format!("Couldn't initialize document history: {e}").into());
+		DocumentHistory::default()
+	});
+	let restored_page = document_history
+		.last_pages_opened
+		.get(&path.to_string_lossy().to_string())
+		.copied();
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend).map_err(|e| {
@@ -313,6 +304,20 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let tui_rx = tui_rx.into_stream();
 	let from_converter = from_converter.into_stream();
 
+	if let Some(page) = restored_page {
+		tui.set_page(page);
+		to_renderer
+			.send(RenderNotif::JumpToPage(page))
+			.map_err(|e| {
+				WrappedErr(format!("Couldn't tell renderer to jump to restored page: {e}").into())
+			})?;
+		to_converter
+			.send(ConverterMsg::GoToPage(page))
+			.map_err(|e| {
+				WrappedErr(format!("Couldn't tell converter to jump to restored page: {e}").into())
+			})?;
+	}
+
 	enter_redraw_loop(
 		ev_stream,
 		to_renderer,
@@ -320,7 +325,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		to_converter,
 		from_converter,
 		fullscreen,
-		tui,
+		&mut tui,
 		&mut term,
 		main_area,
 		font_size
@@ -346,6 +351,14 @@ async fn inner_main() -> Result<(), WrappedErr> {
 
 	drop(maybe_logger);
 
+	document_history
+		.last_pages_opened
+		.insert(path.to_string_lossy().to_string(), tui.page);
+
+	if let Err(e) = document_history.save() {
+		WrappedErr(format!("Failed to save last opened page: {e}").into());
+	}
+
 	Ok(())
 }
 
@@ -358,7 +371,7 @@ async fn enter_redraw_loop(
 	to_converter: Sender<ConverterMsg>,
 	mut from_converter: RecvStream<'_, Result<ConvertedPage, RenderError>>,
 	mut fullscreen: bool,
-	mut tui: Tui,
+	tui: &mut Tui,
 	term: &mut Terminal<CrosstermBackend<Stdout>>,
 	mut main_area: tdf::tui::RenderLayout,
 	font_size: FontSize

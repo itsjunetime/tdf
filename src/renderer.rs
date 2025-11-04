@@ -16,6 +16,15 @@ const KITTY_MAX_W_OR_H: f32 = 10_000.0;
 pub enum RenderNotif {
 	Area(Rect),
 	JumpToPage(usize),
+	/// Query: which link (if any) is under the provided device pixel coords (relative to the
+	/// top-left of the rendered page image). The renderer replies on the provided Sender with
+	/// Some(LinkTarget) if a link was found, otherwise None.
+	QueryLinkAt {
+		page: usize,
+		device_x_px: f32,
+		device_y_px: f32,
+		resp: Sender<Option<LinkTarget>>
+	},
 	PageNeedsReRender(usize),
 	Search(String),
 	SwitchFitOrFill(FitOrFill),
@@ -35,6 +44,15 @@ pub enum RenderInfo {
 	Page(PageInfo),
 	SearchResults { page_num: usize, num_results: usize },
 	Reloaded
+}
+
+/// A link target discovered on a page.
+#[derive(Debug, Clone)]
+pub enum LinkTarget {
+	/// External URI to open in a browser
+	Uri(String),
+	/// Internal document destination: page index (0-based)
+	GoTo { page_index: usize }
 }
 
 #[derive(Clone)]
@@ -186,6 +204,41 @@ pub fn start_rendering(
 			macro_rules! handle_notif {
 				($notif:ident) => {{
 					match $notif {
+						RenderNotif::QueryLinkAt { page: qpage, device_x_px, device_y_px, resp } => {
+							let result = (|| -> Result<Option<LinkTarget>, mupdf::error::Error> {
+								// load the requested page and compute same scale as used when rendering
+								let page = doc.load_page(qpage as i32)?;
+								let bounds = page.bounds()?;
+								let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+								let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
+								let scale_factor = scaled.scale_factor;
+								let pdf_x = device_x_px / scale_factor;
+								let pdf_y = device_y_px / scale_factor;
+								if let Ok(mut links) = page.links() {
+									while let Some(link) = links.next() {
+										let lb = link.bounds;
+										if pdf_x >= lb.x0 && pdf_x <= lb.x1 && pdf_y >= lb.y0 && pdf_y <= lb.y1 {
+											// prefer URI if present and non-empty
+											if !link.uri.is_empty() {
+												return Ok(Some(LinkTarget::Uri(link.uri)));
+											}
+											if let Some(dest) = link.dest {
+												return Ok(Some(LinkTarget::GoTo { page_index: dest.loc.page_number as usize }));
+											}
+										}
+									}
+								}
+								Ok(None)
+							})();
+							match result {
+								Ok(Some(t)) => { let _ = resp.send(Some(t)); },
+								Ok(None) => { let _ = resp.send(None); },
+								Err(e) => {
+									log::error!("Failed to query links: {e}");
+									let _ = resp.send(None);
+								}
+							}
+						},
 						RenderNotif::Reload => continue 'reload,
 						RenderNotif::Invert => {
 							invert = !invert;

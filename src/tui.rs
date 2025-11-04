@@ -1,7 +1,7 @@
 use std::{borrow::Cow, io::stdout, num::NonZeroUsize};
 
 use crossterm::{
-	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
+	event::{Event, KeyCode, KeyModifiers, MouseEventKind, MouseButton},
 	execute,
 	terminal::{
 		BeginSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
@@ -362,6 +362,54 @@ impl Tui {
 				y: img_area.y
 			}))
 		}
+	}
+
+	/// Map a terminal cell click (col, row) to a displayed page and device pixel coords.
+	/// Returns (page_index, device_x_px, device_y_px) if the click hits a page image.
+	pub fn map_click_to_page(&self, col: u16, row: u16, full_layout: &RenderLayout, font_size: FontSize) -> Option<(usize, f32, f32)> {
+		let mut img_area = full_layout.page_area;
+
+		// Determine which pages are currently being displayed by reconstructing the same logic
+		// used in `render` to compute `to_display` positions.
+
+		let mut page_widths = self.rendered[self.page..]
+			.iter()
+			// only take those that have images ready
+			.take_while(|p| p.img.is_some())
+			.map(|p| p.img.as_ref().map(|img| (img.w_h().0, img)))
+			.filter_map(|o| o)
+			.collect::<Vec<_>>();
+
+		if page_widths.is_empty() {
+			return None;
+		}
+
+		if self.page_constraints.r_to_l {
+			page_widths.reverse();
+		}
+
+		let total_width = page_widths.iter().map(|(w, _)| *w).sum::<u16>();
+		let unused_width = img_area.width.saturating_sub(total_width);
+		img_area.x += unused_width / 2;
+
+		// iterate through displayed pages and see if click falls into one
+		let mut x = img_area.x;
+		for (idx, (cell_w, _img)) in page_widths.into_iter().enumerate() {
+			let page_num = self.page + idx;
+			let area = Rect { x, y: img_area.y, width: cell_w, height: img_area.height };
+			if col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height {
+				// compute local cell offset
+				let local_col = col - area.x;
+				let local_row = row - area.y;
+				let device_x = f32::from(local_col) * f32::from(font_size.0);
+				let device_y = f32::from(local_row) * f32::from(font_size.1);
+				return Some((page_num, device_x, device_y));
+			}
+
+			x += cell_w;
+		}
+
+		None
 	}
 
 	fn render_loading_in(frame: &mut Frame<'_>, area: Rect) {
@@ -770,6 +818,10 @@ impl Tui {
 					}
 				} else {
 					match mouse.kind {
+						MouseEventKind::Down(MouseButton::Left) => {
+							// return click with terminal cell coords
+							return Some(InputAction::Click { col: mouse.column, row: mouse.row });
+						}
 						MouseEventKind::ScrollRight =>
 							self.change_page(PageChange::Next, ChangeAmount::Single),
 						MouseEventKind::ScrollDown =>
@@ -908,13 +960,15 @@ ctrl+z:
 ";
 
 pub enum InputAction {
-	Redraw,
-	JumpingToPage(usize),
-	Search(String),
-	QuitApp,
-	Invert,
-	Fullscreen,
-	SwitchRenderZoom(crate::FitOrFill)
+    Redraw,
+    JumpingToPage(usize),
+    Search(String),
+    QuitApp,
+    Invert,
+    Fullscreen,
+    SwitchRenderZoom(crate::FitOrFill),
+    /// Mouse left-click at terminal cell (column, row)
+    Click { col: u16, row: u16 }
 }
 
 #[derive(Copy, Clone)]

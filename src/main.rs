@@ -35,7 +35,7 @@ use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
-	renderer::{self, RenderError, RenderInfo, RenderNotif},
+	renderer::{self, RenderError, RenderInfo, RenderNotif, LinkTarget},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
 
@@ -376,6 +376,30 @@ async fn enter_redraw_loop(
 					None => needs_redraw = false,
 					Some(action) => match action {
 						InputAction::Redraw => (),
+						InputAction::Click { col, row } => {
+							if let Some((page_num, device_x, device_y)) = tui.map_click_to_page(col, row, &main_area, font_size) {
+								let (resp_tx, resp_rx) = flume::bounded(1);
+								to_renderer.send(RenderNotif::QueryLinkAt {
+									page: page_num,
+									device_x_px: device_x,
+									device_y_px: device_y,
+									resp: resp_tx
+								})?;
+								// await the renderer reply
+								match resp_rx.recv_async().await {
+									Ok(Some(LinkTarget::Uri(uri))) => {
+										if let Err(e) = webbrowser::open(&uri) {
+											log::error!("Failed to open uri {}: {:?}", uri, e);
+										}
+									}
+									Ok(Some(LinkTarget::GoTo { page_index })) => {
+										to_renderer.send(RenderNotif::JumpToPage(page_index))?;
+										to_converter.send(ConverterMsg::GoToPage(page_index))?;
+									}
+									_ => (),
+								}
+							}
+						},
 						InputAction::QuitApp => return Ok(()),
 						InputAction::JumpingToPage(page) => {
 							to_renderer.send(RenderNotif::JumpToPage(page))?;

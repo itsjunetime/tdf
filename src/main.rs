@@ -267,12 +267,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		|| "Unknown file".into(),
 		|n| n.to_string_lossy().to_string()
 	);
-	let tui = Tui::new(
-		file_name,
-		flags.max_wide,
-		flags.r_to_l,
-		is_kitty
-	);
+	let tui = Tui::new(file_name, flags.max_wide, flags.r_to_l, is_kitty);
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend).map_err(|e| {

@@ -49,7 +49,7 @@ log = "0.4.27"
 flexi_logger = "0.31"
 
 # for tracing with tokio-console
-console-subscriber = { version = "0.4.0", optional = true }
+console-subscriber = { version = "0.5.0", optional = true }
 csscolorparser = { version = "0.7.0" }
 
 [profile.production]
@@ -92,7 +92,7 @@ checked_conversions = "warn"
 copy_iterator = "warn"
 default_trait_access = "warn"
 doc_link_with_quotes = "warn"
-empty_enum = "warn"
+empty_enums = "warn"
 explicit_into_iter_loop = "warn"
 explicit_iter_loop = "warn"
 filter_map_next = "warn"

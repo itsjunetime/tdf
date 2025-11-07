@@ -787,7 +787,7 @@ impl Tui {
 		}
 	}
 
-	// I want this to always return 0 'cause I just use it to return from `Self::handle_event`]
+	// I want this to always return an option 'cause I just use it to return from `Self::handle_event`
 	#[expect(clippy::unnecessary_wraps)]
 	fn update_zoom(&mut self, f: impl FnOnce(&mut Zoom)) -> Option<InputAction> {
 		if let Some(z) = &mut self.zoom {

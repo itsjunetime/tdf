@@ -83,7 +83,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let flags = xflags::parse_or_exit! {
 		/// Display the pdf with the pages starting at the right hand size and moving left and
 		/// adjust input keys to match
-		optional -r,--r-to-l r_to_l: bool
+		optional -r,--r-to-l
 		/// The maximum number of pages to display together, horizontally, at a time
 		optional -m,--max-wide max_wide: NonZeroUsize
 		/// Fullscreen the pdf (hide document name, page count, etc)
@@ -270,7 +270,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let tui = Tui::new(
 		file_name,
 		flags.max_wide,
-		flags.r_to_l.unwrap_or_default(),
+		flags.r_to_l,
 		is_kitty
 	);
 

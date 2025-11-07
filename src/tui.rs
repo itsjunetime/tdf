@@ -205,23 +205,28 @@ impl Tui {
 
 					log::debug!("zoom is now {zoom:#?}");
 					log::debug!("img_area is {img_area:#?}");
+					log::debug!("img dimensions are {cell_w}x{cell_h}");
 
-					if zoom.level < 0 {
-						img_area = Rect {
-							width: img_area
-								.width
-								.saturating_sub((zoom.level * 2).unsigned_abs())
-								.max(1),
-							x: img_area.x + (zoom.level.unsigned_abs().min(img_area.width / 2)),
-							..img_area
-						}
-					}
-
-					log::debug!("after adjustment, img_area is {img_area:#?}");
-
-					// Ugh I don't like this logic. I wish we could simplify it.
 					let img_width = f32::from(cell_w);
 					let img_height = f32::from(cell_h);
+
+					let img_aspect_ratio = img_width / img_height;
+
+					if zoom.level < 0 {
+						let old_width = img_area.width;
+						img_area.width = img_area
+							.width
+							.saturating_sub((zoom.level * 2).unsigned_abs())
+							.max((f32::from(img_area.height) * img_aspect_ratio) as u16);
+						img_area.x += (old_width - img_area.width) / 2;
+
+						log::debug!("after adjustment, img_area is {img_area:#?}");
+
+						// TODO: Find a way to detect when we've hit the maximum zoom-out and stop
+						// more zooming out
+					}
+
+					// Ugh I don't like this logic. I wish we could simplify it.
 					let img_area_width = f32::from(img_area.width);
 					let img_area_height = f32::from(img_area.height);
 					let available_to_real_width_ratio = img_area_width / img_width;

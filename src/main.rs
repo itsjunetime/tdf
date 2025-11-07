@@ -87,7 +87,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		/// The maximum number of pages to display together, horizontally, at a time
 		optional -m,--max-wide max_wide: NonZeroUsize
 		/// Fullscreen the pdf (hide document name, page count, etc)
-		optional -f,--fullscreen fullscreen: bool
+		optional -f,--fullscreen
 		/// The number of pages to prerender surrounding the currently-shown page; 0 means no
 		/// limit. By default, there is no limit.
 		optional -p,--prerender prerender: usize
@@ -300,7 +300,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		})?;
 	}
 
-	let fullscreen = flags.fullscreen.unwrap_or_default();
+	let fullscreen = flags.fullscreen;
 	let main_area = Tui::main_layout(&term.get_frame(), fullscreen);
 	to_renderer
 		.send(RenderNotif::Area(main_area.page_area))

@@ -83,11 +83,11 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let flags = xflags::parse_or_exit! {
 		/// Display the pdf with the pages starting at the right hand size and moving left and
 		/// adjust input keys to match
-		optional -r,--r-to-l r_to_l: bool
+		optional -r,--r-to-l
 		/// The maximum number of pages to display together, horizontally, at a time
 		optional -m,--max-wide max_wide: NonZeroUsize
 		/// Fullscreen the pdf (hide document name, page count, etc)
-		optional -f,--fullscreen fullscreen: bool
+		optional -f,--fullscreen
 		/// The number of pages to prerender surrounding the currently-shown page; 0 means no
 		/// limit. By default, there is no limit.
 		optional -p,--prerender prerender: usize
@@ -267,12 +267,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		|| "Unknown file".into(),
 		|n| n.to_string_lossy().to_string()
 	);
-	let tui = Tui::new(
-		file_name,
-		flags.max_wide,
-		flags.r_to_l.unwrap_or_default(),
-		is_kitty
-	);
+	let tui = Tui::new(file_name, flags.max_wide, flags.r_to_l, is_kitty);
 
 	let backend = CrosstermBackend::new(std::io::stdout());
 	let mut term = Terminal::new(backend).map_err(|e| {
@@ -300,7 +295,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		})?;
 	}
 
-	let fullscreen = flags.fullscreen.unwrap_or_default();
+	let fullscreen = flags.fullscreen;
 	let main_area = Tui::main_layout(&term.get_frame(), fullscreen);
 	to_renderer
 		.send(RenderNotif::Area(main_area.page_area))

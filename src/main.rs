@@ -35,7 +35,7 @@ use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
-	renderer::{self, RenderError, RenderInfo, RenderNotif, LinkTarget},
+	renderer::{self, LinkTarget, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
 
@@ -377,26 +377,46 @@ async fn enter_redraw_loop(
 					Some(action) => match action {
 						InputAction::Redraw => (),
 						InputAction::Click { col, row } => {
-							if let Some((page_num, device_x, device_y)) = tui.map_click_to_page(col, row, &main_area, font_size) {
+							if let Some((page_num, mupdf_x, mupdf_y)) = tui.map_click_to_page(col, row, &main_area, font_size) {
 								let (resp_tx, resp_rx) = flume::bounded(1);
 								to_renderer.send(RenderNotif::QueryLinkAt {
 									page: page_num,
-									device_x_px: device_x,
-									device_y_px: device_y,
+									mupdf_x_px: mupdf_x,
+									mupdf_y_px: mupdf_y,
 									resp: resp_tx
 								})?;
-								// await the renderer reply
+								// await the renderer reply; the renderer now returns
+								// Result<Option<LinkTarget>, String> so we can display errors
 								match resp_rx.recv_async().await {
-									Ok(Some(LinkTarget::Uri(uri))) => {
+									Ok(Ok(Some(LinkTarget::Uri(uri)))) => {
 										if let Err(e) = webbrowser::open(&uri) {
-											log::error!("Failed to open uri {}: {:?}", uri, e);
+											tui.set_msg(MessageSetting::Some(BottomMessage::Error(
+												format!("Failed to open uri {}: {e}", uri)
+											)));
 										}
 									}
-									Ok(Some(LinkTarget::GoTo { page_index })) => {
-										to_renderer.send(RenderNotif::JumpToPage(page_index))?;
-										to_converter.send(ConverterMsg::GoToPage(page_index))?;
+									Ok(Ok(Some(LinkTarget::GoTo { page_index }))) => {
+										if let Err(e) = to_renderer.send(RenderNotif::JumpToPage(page_index)) {
+											tui.set_msg(MessageSetting::Some(BottomMessage::Error(
+												format!("Failed to send jump-to-page to renderer: {e}")
+											)));
+										}
+
+										if let Err(e) = to_converter.send(ConverterMsg::GoToPage(page_index)) {
+											tui.set_msg(MessageSetting::Some(BottomMessage::Error(
+												format!("Failed to send jump-to-page to converter: {e}")
+											)));
+										}
 									}
-									_ => (),
+									Ok(Ok(None)) => {},
+									Ok(Err(err_str)) => {
+										tui.set_msg(MessageSetting::Some(BottomMessage::Error(err_str)));
+									}
+									Err(e) => {
+										tui.set_msg(MessageSetting::Some(BottomMessage::Error(
+											format!("Failed to receive link response from renderer: {e}")
+										)));
+									}
 								}
 							}
 						},

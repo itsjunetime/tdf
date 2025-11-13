@@ -21,9 +21,12 @@ pub enum RenderNotif {
 	/// Some(LinkTarget) if a link was found, otherwise None.
 	QueryLinkAt {
 		page: usize,
-		device_x_px: f32,
-		device_y_px: f32,
-		resp: Sender<Option<LinkTarget>>
+		mupdf_x_px: f32,
+		mupdf_y_px: f32,
+		// Send back either the found link (Some) or None, or an Err(String) describing an
+		// internal failure. If sending on this channel fails it indicates the receiver has
+		// disconnected (main thread exited) and we should panic.
+		resp: Sender<Result<Option<LinkTarget>, String>>
 	},
 	PageNeedsReRender(usize),
 	Search(String),
@@ -82,6 +85,46 @@ const MUPDF_WHITE: i32 = i32::from_be_bytes([0, 0xff, 0xff, 0xff]);
 pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 	vec.clear();
 	vec.resize_with(size, T::default);
+}
+
+/// Query which link (if any) is under the provided mupdf device coordinates for the given
+/// page. Returns Ok(Some(LinkTarget)) if a link is found, Ok(None) if no link, or
+/// Err(mupdf::error::Error) on mupdf failures.
+fn query_link_at(
+	doc: &Document,
+	qpage: usize,
+	mupdf_x_px: f32,
+	mupdf_y_px: f32,
+	area_w: f32,
+	area_h: f32,
+	fit_or_fill: FitOrFill,
+) -> Result<Option<LinkTarget>, mupdf::error::Error> {
+	// load the requested page and compute same scale as used when rendering
+	let page = doc.load_page(qpage as i32)?;
+	let bounds = page.bounds()?;
+	let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
+	let scale_factor = scaled.scale_factor;
+
+	let pdf_x = mupdf_x_px / scale_factor;
+	let pdf_y = mupdf_y_px / scale_factor;
+
+	if let Ok(mut links) = page.links() {
+		while let Some(link) = links.next() {
+			let lb = link.bounds;
+			if pdf_x >= lb.x0 && pdf_x <= lb.x1 && pdf_y >= lb.y0 && pdf_y <= lb.y1 {
+				// prefer URI if present and non-empty
+				if !link.uri.is_empty() {
+					return Ok(Some(LinkTarget::Uri(link.uri)));
+				}
+				if let Some(dest) = link.dest {
+					return Ok(Some(LinkTarget::GoTo { page_index: dest.loc.page_number as usize }));
+				}
+			}
+		}
+	}
+
+	Ok(None)
 }
 
 // this function has to be sync (non-async) because the mupdf::Document needs to be held during
@@ -204,41 +247,26 @@ pub fn start_rendering(
 			macro_rules! handle_notif {
 				($notif:ident) => {{
 					match $notif {
-						RenderNotif::QueryLinkAt { page: qpage, device_x_px, device_y_px, resp } => {
-							let result = (|| -> Result<Option<LinkTarget>, mupdf::error::Error> {
-								// load the requested page and compute same scale as used when rendering
-								let page = doc.load_page(qpage as i32)?;
-								let bounds = page.bounds()?;
-								let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
-								let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
-								let scale_factor = scaled.scale_factor;
-								let pdf_x = device_x_px / scale_factor;
-								let pdf_y = device_y_px / scale_factor;
-								if let Ok(mut links) = page.links() {
-									while let Some(link) = links.next() {
-										let lb = link.bounds;
-										if pdf_x >= lb.x0 && pdf_x <= lb.x1 && pdf_y >= lb.y0 && pdf_y <= lb.y1 {
-											// prefer URI if present and non-empty
-											if !link.uri.is_empty() {
-												return Ok(Some(LinkTarget::Uri(link.uri)));
-											}
-											if let Some(dest) = link.dest {
-												return Ok(Some(LinkTarget::GoTo { page_index: dest.loc.page_number as usize }));
-											}
-										}
-									}
+						RenderNotif::QueryLinkAt { page: qpage, mupdf_x_px, mupdf_y_px, resp } => {
+							match query_link_at(&doc, qpage, mupdf_x_px, mupdf_y_px, area_w, area_h, fit_or_fill) {
+								Ok(Some(t)) => {
+									resp.send(Ok(Some(t))).unwrap_or_else(|e| {
+										panic!("Renderer failed to send link query response: {e}")
+									});
 								}
-								Ok(None)
-							})();
-							match result {
-								Ok(Some(t)) => { let _ = resp.send(Some(t)); },
-								Ok(None) => { let _ = resp.send(None); },
+								Ok(None) => {
+									resp.send(Ok(None)).unwrap_or_else(|e| {
+										panic!("Renderer failed to send link query response: {e}")
+									});
+								}
 								Err(e) => {
-									log::error!("Failed to query links: {e}");
-									let _ = resp.send(None);
+									let err_str = format!("Failed to query links: {e}");
+									resp.send(Err(err_str)).unwrap_or_else(|e| {
+										panic!("Renderer failed to send link-query error: {e}")
+									});
 								}
 							}
-						},
+						}
 						RenderNotif::Reload => continue 'reload,
 						RenderNotif::Invert => {
 							invert = !invert;

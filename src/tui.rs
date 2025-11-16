@@ -16,6 +16,7 @@ use nix::{
 use ratatui::{
 	Frame,
 	layout::{Constraint, Flex, Layout, Position, Rect},
+	prelude::{Line, Text},
 	style::{Color, Style},
 	symbols::border,
 	text::Span,
@@ -565,6 +566,12 @@ impl Tui {
 						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) =
 							self.bottom_msg
 						{
+							if c == 'g' && self.is_kitty {
+								self.update_zoom(|z| z.cell_pan_from_top = 0);
+								self.set_msg(MessageSetting::Pop);
+								return Some(InputAction::Redraw);
+							}
+
 							return c.to_digit(10).map(|input_num| {
 								*page = (*page * 10) + input_num as usize;
 								InputAction::Redraw
@@ -678,6 +685,8 @@ impl Tui {
 							'K' if self.is_kitty => self.update_zoom(|z| {
 								z.cell_pan_from_top = z.cell_pan_from_top.saturating_sub(1)
 							}),
+							'G' if self.is_kitty =>
+								self.update_zoom(|z| z.cell_pan_from_top = u16::MAX),
 							_ => None
 						}
 					}
@@ -852,11 +861,24 @@ impl Tui {
 			.border_set(border::ROUNDED)
 			.border_style(Color::Blue);
 
-		let help_span = Paragraph::new(HELP_PAGE).wrap(Wrap { trim: false });
+		let help_sections = [
+			Text::from(HELP_PAGE),
+			// just some spacing
+			Text::from(""),
+			if self.is_kitty {
+				Text::from(KITTY_HELP)
+			} else {
+				Text::from("Not using kitty, kitty-specific keybindings hidden")
+					.style(Color::DarkGray)
+			}
+		];
 
-		let max_w: u16 = HELP_PAGE
-			.lines()
-			.map(str::len)
+		let max_w: u16 = help_sections
+			.iter()
+			.flat_map(|section| section.lines.as_slice())
+			// We don't really need full unicode-width since we're using all ascii for the help
+			// pages, but this is the function they give us.
+			.map(Line::width)
 			.max()
 			.unwrap_or_default()
 			.try_into()
@@ -871,15 +893,24 @@ impl Tui {
 
 		let block_area = Layout::vertical([
 			Constraint::Fill(1),
-			Constraint::Length(u16::try_from(HELP_PAGE.lines().count()).unwrap() + 4),
+			Constraint::Length(
+				u16::try_from(help_sections.iter().map(|s| s.lines.len()).sum::<usize>()).unwrap()
+					+ 4
+			),
 			Constraint::Fill(1)
 		])
 		.split(layout[1]);
 
-		let block_inner = block.inner(block_area[1]);
+		let mut block_inner = block.inner(block_area[1]);
 
 		frame.render_widget(block, block_area[1]);
-		frame.render_widget(help_span, block_inner);
+
+		for section in help_sections {
+			let section_lines = section.lines.len();
+			let span = Paragraph::new(section).wrap(Wrap { trim: false });
+			frame.render_widget(span, block_inner);
+			block_inner.y += u16::try_from(section_lines).unwrap();
+		}
 	}
 }
 
@@ -900,16 +931,22 @@ i:
     Invert colors
 f:
     Remove borders/fullscreen
-z (when using kitty protocol):
-    Toggle between fill-screen and fit-screen
-o/O (when on fill-screen):
-    zoom in and out, respectively
-H, J, K, L (when zoomed in):
-    pan direction around page
 ?:
     Show this page
 ctrl+z:
     Suspend & background tdf \
+";
+
+static KITTY_HELP: &str = "\
+When using Kitty Protocol:
+z:
+    Toggle between fill-screen and fit-screen
+o/O (when on fill-screen):
+    Zoom in and out, respectively
+gg/G (when on fill-screen):
+    Scroll to top/bottom of page
+H, J, K, L (when zoomed in):
+    Pan direction around page
 ";
 
 pub enum InputAction {

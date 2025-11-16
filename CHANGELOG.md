@@ -3,6 +3,8 @@
 - Switched simd base64 crate for one that works on stable (from `vb64` to `base64_simd`)
 - Allow boolean arguments to function as flags, without a `true` or `false` argument following the flag itself
 - Fix cropping issues when zooming out too much while using kitty protocol
+- Added `gg` and `G` keybindings for scrolling to the top and bottom of a page, respectively, when filling the width of the screen with kitty
+- Updated help page to only show kitty keybindings when you're actually using kitty
 
 # v0.4.3
 

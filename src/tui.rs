@@ -1,7 +1,7 @@
 use std::{borrow::Cow, io::stdout, num::NonZeroUsize};
 
 use crossterm::{
-	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
+	event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind},
 	execute,
 	terminal::{
 		BeginSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
@@ -279,9 +279,55 @@ impl Tui {
 			};
 
 			// here we calculate how many pages can fit in the available area.
+			// We do this in two passes so we don't need to collect the images into an
+			// intermediate vector: first pass sums widths to determine centering, second
+			// pass renders pages one-at-a-time. We still avoid keeping references across
+			// the two passes.
+			let mut total_width: u16 = 0;
+			let mut pages_shown: usize = 0;
+
+			for (idx, page) in self.rendered[self.page..].iter_mut().enumerate() {
+				// only consider pages that have an image ready
+				if page.img.is_none() {
+					break;
+				}
+
+				if let Some(max) = self.page_constraints.max_wide {
+					if idx >= max.get() {
+						break;
+					}
+				}
+
+				let width = page.img.as_mut().map(|img| img.w_h().0).unwrap_or(0);
+
+				// stop if this would overflow the available area
+				match total_width.checked_add(width) {
+					Some(new_total) if new_total <= img_area.width => {
+						total_width = new_total;
+						pages_shown += 1;
+					}
+					_ => break
+				}
+			}
+
+			if pages_shown == 0 {
+				// If none are ready to render, just show the loading thing
+				Self::render_loading_in(frame, img_area);
+				return KittyDisplay::ClearImages;
+			}
+
+			execute!(stdout(), BeginSynchronizedUpdate).unwrap();
+
+			self.last_render.pages_shown = pages_shown;
+
+			let unused_width = img_area.width - total_width;
+			self.last_render.unused_width = unused_width;
+			img_area.x += unused_width / 2;
+
+			// Collect mutable references to the images for rendering in a single pass so
+			// we satisfy the borrow checker, then render them below.
 			let mut test_area_w = img_area.width;
-			// go through our pages, starting at the first one we want to view
-			let mut page_widths = self.rendered[self.page..]
+			let mut page_pairs = self.rendered[self.page..]
 				.iter_mut()
 				// and get this to represent a count of how many we're looking at so far to render
 				.enumerate()
@@ -306,46 +352,40 @@ impl Tui {
 				.collect::<Vec<_>>();
 
 			if self.page_constraints.r_to_l {
-				page_widths.reverse();
+				page_pairs.reverse();
 			}
 
-			if page_widths.is_empty() {
-				// If none are ready to render, just show the loading thing
-				Self::render_loading_in(frame, img_area);
-				KittyDisplay::ClearImages
-			} else {
-				execute!(stdout(), BeginSynchronizedUpdate).unwrap();
+			execute!(stdout(), BeginSynchronizedUpdate).unwrap();
 
-				let total_width = page_widths.iter().map(|(w, _)| w).sum::<u16>();
+			let total_width = page_pairs.iter().map(|(w, _)| *w).sum::<u16>();
 
-				self.last_render.pages_shown = page_widths.len();
+			self.last_render.pages_shown = page_pairs.len();
 
-				let unused_width = img_area.width - total_width;
-				self.last_render.unused_width = unused_width;
-				img_area.x += unused_width / 2;
+			let unused_width = img_area.width - total_width;
+			self.last_render.unused_width = unused_width;
+			img_area.x += unused_width / 2;
 
-				let to_display = page_widths
-					.into_iter()
-					.enumerate()
-					.filter_map(|(idx, (width, img))| {
-						let maybe_img =
-							Self::render_single_page(frame, img, Rect { width, ..img_area });
-						img_area.x += width;
-						maybe_img.map(|(img, pos)| KittyReadyToDisplay {
-							img,
-							page_num: idx + self.page,
-							pos,
-							display_loc: DisplayLocation::default()
-						})
+			let to_display = page_pairs
+				.into_iter()
+				.enumerate()
+				.filter_map(|(idx, (width, img))| {
+					let maybe_img =
+						Self::render_single_page(frame, img, Rect { width, ..img_area });
+					img_area.x += width;
+					maybe_img.map(|(img, pos)| KittyReadyToDisplay {
+						img,
+						page_num: idx + self.page,
+						pos,
+						display_loc: DisplayLocation::default()
 					})
-					.collect::<Vec<_>>();
+				})
+				.collect::<Vec<_>>();
 
-				// we want to set this at the very end so it doesn't get set somewhere halfway through and
-				// then the whole diffing thing messes it up
-				self.last_render.rect = size;
+			// we want to set this at the very end so it doesn't get set somewhere halfway through and
+			// then the whole diffing thing messes it up
+			self.last_render.rect = size;
 
-				KittyDisplay::DisplayImages(to_display)
-			}
+			KittyDisplay::DisplayImages(to_display)
 		}
 	}
 
@@ -370,6 +410,92 @@ impl Tui {
 		}
 	}
 
+	/// Map a terminal cell click (col, row) to a displayed page and MuPDF coordinates.
+	/// Returns (page_index, mupdf_x_px, mupdf_y_px) if the click hits a page image.
+	pub fn map_click_to_page(
+		&self,
+		col: u16,
+		row: u16,
+		full_layout: &RenderLayout,
+		font_size: FontSize
+	) -> Option<(usize, f32, f32)> {
+		let img_area = full_layout.page_area;
+
+		// First, compute how many pages will be shown and their total width using the same
+		// greedy logic as `render` so our positioning matches exactly.
+		let mut total_width: u16 = 0;
+		let mut pages_shown: usize = 0;
+
+		for (idx, page) in self.rendered[self.page..].iter().enumerate() {
+			// only consider pages that have an image ready
+			if page.img.is_none() {
+				break;
+			}
+
+			if let Some(max) = self.page_constraints.max_wide {
+				if idx >= max.get() {
+					break;
+				}
+			}
+
+			let width = page.img.as_ref().map(|img| img.w_h().0).unwrap_or(0);
+
+			match total_width.checked_add(width) {
+				Some(new_total) if new_total <= img_area.width => {
+					total_width = new_total;
+					pages_shown += 1;
+				}
+				_ => break,
+			}
+		}
+
+		if pages_shown == 0 {
+			return None;
+		}
+
+		// Collect the shown pages and their widths in the same order `render` would render
+		let mut page_infos: Vec<(usize, u16)> = self
+			.rendered[self.page..]
+			.iter()
+			.take(pages_shown)
+			.enumerate()
+			.filter_map(|(idx, p)| p.img.as_ref().map(|img| (self.page + idx, img.w_h().0)))
+			.collect();
+
+		if self.page_constraints.r_to_l {
+			page_infos.reverse();
+		}
+
+		let unused_width = img_area.width.saturating_sub(total_width);
+		let mut x = img_area.x + (unused_width / 2);
+
+		// iterate through displayed pages and see if click falls into one
+		for (page_num, cell_w) in page_infos {
+			let area = Rect {
+				x,
+				y: img_area.y,
+				width: cell_w,
+				height: img_area.height,
+			};
+			if col >= area.x
+				&& col < area.x + area.width
+				&& row >= area.y
+				&& row < area.y + area.height
+			{
+				// compute local cell offset within this page's rendered area
+				let local_col = col - area.x;
+				let local_row = row - area.y;
+				let mupdf_x = f32::from(local_col) * f32::from(font_size.0);
+				let mupdf_y = f32::from(local_row) * f32::from(font_size.1);
+				return Some((page_num, mupdf_x, mupdf_y));
+			}
+
+			x += cell_w;
+		}
+
+		None
+	}
+
 	fn render_loading_in(frame: &mut Frame<'_>, area: Rect) {
 		let loading_str = "Loading...";
 		let inner_space = Layout::horizontal([Constraint::Length(loading_str.len() as u16)])
@@ -387,10 +513,6 @@ impl Tui {
 			ChangeAmount::WholeScreen => self.last_render.pages_shown
 		};
 
-		// This is a kinda weird way to switch around the controls for this sort of thing but it
-		// allows it to be pretty centralized and avoids annoyingly duplicated match arms (since
-		// we'd have to do `match key { 'h' if r_to_l | 'l' => {}}` and that doesn't play well with
-		// `if` guards on match arms)
 		if self.page_constraints.r_to_l {
 			change = match change {
 				PageChange::Next => PageChange::Prev,
@@ -784,6 +906,13 @@ impl Tui {
 					}
 				} else {
 					match mouse.kind {
+						MouseEventKind::Down(MouseButton::Left) => {
+							// return click with terminal cell coords
+							return Some(InputAction::Click {
+								col: mouse.column,
+								row: mouse.row
+							});
+						}
 						MouseEventKind::ScrollRight =>
 							self.change_page(PageChange::Next, ChangeAmount::Single),
 						MouseEventKind::ScrollDown =>
@@ -956,7 +1085,12 @@ pub enum InputAction {
 	QuitApp,
 	Invert,
 	Fullscreen,
-	SwitchRenderZoom(crate::FitOrFill)
+	SwitchRenderZoom(crate::FitOrFill),
+	/// Mouse left-click at terminal cell (column, row)
+	Click {
+		col: u16,
+		row: u16
+	}
 }
 
 #[derive(Copy, Clone)]

@@ -109,8 +109,8 @@ fn query_link_at(
 	let pdf_x = mupdf_x_px / scale_factor;
 	let pdf_y = mupdf_y_px / scale_factor;
 
-	if let Ok(mut links) = page.links() {
-		while let Some(link) = links.next() {
+	if let Ok(links) = page.links() {
+		for link in links {
 			let lb = link.bounds;
 			if pdf_x >= lb.x0 && pdf_x <= lb.x1 && pdf_y >= lb.y0 && pdf_y <= lb.y1 {
 				// prefer URI if present and non-empty
@@ -249,23 +249,15 @@ pub fn start_rendering(
 					match $notif {
 						RenderNotif::QueryLinkAt { page: qpage, mupdf_x_px, mupdf_y_px, resp } => {
 							match query_link_at(&doc, qpage, mupdf_x_px, mupdf_y_px, area_w, area_h, fit_or_fill) {
-								Ok(Some(t)) => {
-									resp.send(Ok(Some(t))).unwrap_or_else(|e| {
-										panic!("Renderer failed to send link query response: {e}")
-									});
-								}
-								Ok(None) => {
-									resp.send(Ok(None)).unwrap_or_else(|e| {
-										panic!("Renderer failed to send link query response: {e}")
-									});
-								}
+								Ok(t) => resp.send(Ok(t)),
 								Err(e) => {
 									let err_str = format!("Failed to query links: {e}");
-									resp.send(Err(err_str)).unwrap_or_else(|e| {
-										panic!("Renderer failed to send link-query error: {e}")
-									});
+									resp.send(Err(err_str))
 								}
 							}
+							.unwrap_or_else(|e| {
+								panic!("Renderer failed to send link-query response: {e}")
+							});
 						}
 						RenderNotif::Reload => continue 'reload,
 						RenderNotif::Invert => {

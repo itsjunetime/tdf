@@ -277,94 +277,48 @@ impl Tui {
 				}
 			};
 
-			// here we calculate how many pages can fit in the available area.
-			// We do this in two passes so we don't need to collect the images into an
-			// intermediate vector: first pass sums widths to determine centering, second
-			// pass renders pages one-at-a-time. We still avoid keeping references across
-			// the two passes.
-			let mut total_width: u16 = 0;
-			let mut pages_shown: usize = 0;
-
-			for (idx, page) in self.rendered[self.page..].iter_mut().enumerate() {
-				// only consider pages that have an image ready
-				if page.img.is_none() {
-					break;
-				}
-
+		// Collect mutable references to the images for rendering, filtering by constraints.
+		// We do this in a single pass to both determine which pages fit and collect them
+		// for rendering, avoiding duplication of width calculations and centering logic.
+		let mut test_area_w = img_area.width;
+		let mut page_pairs = self.rendered[self.page..]
+			.iter_mut()
+			.enumerate()
+			.take_while(|(idx, page)| {
+				let mut take = page.img.is_some();
 				if let Some(max) = self.page_constraints.max_wide {
-					if idx >= max.get() {
-						break;
-					}
+					take &= *idx < max.get();
 				}
-
-				let width = page.img.as_mut().map(|img| img.w_h().0).unwrap_or(0);
-
-				// stop if this would overflow the available area
-				match total_width.checked_add(width) {
-					Some(new_total) if new_total <= img_area.width => {
-						total_width = new_total;
-						pages_shown += 1;
-					}
-					_ => break
+				take
+			})
+			.filter_map(|(_, page)| page.img.as_mut().map(|img| (img.w_h().0, img)))
+			.take_while(|(width, _)| match test_area_w.checked_sub(*width) {
+				Some(new_val) => {
+					test_area_w = new_val;
+					true
 				}
-			}
+				None => false
+			})
+			.collect::<Vec<_>>();
 
-			if pages_shown == 0 {
-				// If none are ready to render, just show the loading thing
-				Self::render_loading_in(frame, img_area);
-				return KittyDisplay::ClearImages;
-			}
+		if page_pairs.is_empty() {
+			// If none are ready to render, just show the loading thing
+			Self::render_loading_in(frame, img_area);
+			return KittyDisplay::ClearImages;
+		}
 
-			execute!(stdout(), BeginSynchronizedUpdate).unwrap();
+		if self.page_constraints.r_to_l {
+			page_pairs.reverse();
+		}
 
-			self.last_render.pages_shown = pages_shown;
+		execute!(stdout(), BeginSynchronizedUpdate).unwrap();
 
-			let unused_width = img_area.width - total_width;
-			self.last_render.unused_width = unused_width;
-			img_area.x += unused_width / 2;
+		let total_width = page_pairs.iter().map(|(w, _)| *w).sum::<u16>();
+		let unused_width = img_area.width.saturating_sub(total_width);
 
-			// Collect mutable references to the images for rendering in a single pass so
-			// we satisfy the borrow checker, then render them below.
-			let mut test_area_w = img_area.width;
-			let mut page_pairs = self.rendered[self.page..]
-				.iter_mut()
-				// and get this to represent a count of how many we're looking at so far to render
-				.enumerate()
-				// and only take as many as are ready to be rendered
-				.take_while(|(idx, page)| {
-					let mut take = page.img.is_some();
-					if let Some(max) = self.page_constraints.max_wide {
-						take &= *idx < max.get();
-					}
-					take
-				})
-				// and map it to their width (in cells on the terminal, not pixels)
-				.filter_map(|(_, page)| page.img.as_mut().map(|img| (img.w_h().0, img)))
-				// and then take them as long as they won't overflow the available area.
-				.take_while(|(width, _)| match test_area_w.checked_sub(*width) {
-					Some(new_val) => {
-						test_area_w = new_val;
-						true
-					}
-					None => false
-				})
-				.collect::<Vec<_>>();
-
-			if self.page_constraints.r_to_l {
-				page_pairs.reverse();
-			}
-
-			execute!(stdout(), BeginSynchronizedUpdate).unwrap();
-
-			let total_width = page_pairs.iter().map(|(w, _)| *w).sum::<u16>();
-
-			self.last_render.pages_shown = page_pairs.len();
-
-			let unused_width = img_area.width - total_width;
-			self.last_render.unused_width = unused_width;
-			img_area.x += unused_width / 2;
-
-			let to_display = page_pairs
+		self.last_render.pages_shown = page_pairs.len();
+		self.last_render.unused_width = unused_width;
+		img_area.x += unused_width / 2;			let to_display = page_pairs
 				.into_iter()
 				.enumerate()
 				.filter_map(|(idx, (width, img))| {
@@ -420,33 +374,9 @@ impl Tui {
 	) -> Option<(usize, f32, f32)> {
 		let img_area = full_layout.page_area;
 
-		// First, compute how many pages will be shown and their total width using the same
-		// greedy logic as `render` so our positioning matches exactly.
-		let mut total_width: u16 = 0;
-		let mut pages_shown: usize = 0;
-
-		for (idx, page) in self.rendered[self.page..].iter().enumerate() {
-			// only consider pages that have an image ready
-			if page.img.is_none() {
-				break;
-			}
-
-			if let Some(max) = self.page_constraints.max_wide {
-				if idx >= max.get() {
-					break;
-				}
-			}
-
-			let width = page.img.as_ref().map(|img| img.w_h().0).unwrap_or(0);
-
-			match total_width.checked_add(width) {
-				Some(new_total) if new_total <= img_area.width => {
-					total_width = new_total;
-					pages_shown += 1;
-				}
-				_ => break,
-			}
-		}
+		// Use the pages_shown and unused_width computed during render to match exactly.
+		let pages_shown = self.last_render.pages_shown;
+		let unused_width = self.last_render.unused_width;
 
 		if pages_shown == 0 {
 			return None;
@@ -465,7 +395,6 @@ impl Tui {
 			page_infos.reverse();
 		}
 
-		let unused_width = img_area.width.saturating_sub(total_width);
 		let mut x = img_area.x + (unused_width / 2);
 
 		// iterate through displayed pages and see if click falls into one

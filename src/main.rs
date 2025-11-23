@@ -391,17 +391,8 @@ async fn enter_redraw_loop(
 										}
 									}
 									Ok(Ok(Some(LinkTarget::GoTo { page_index }))) => {
-										if let Err(e) = to_renderer.send(RenderNotif::JumpToPage(page_index)) {
-											tui.set_msg(MessageSetting::Some(BottomMessage::Error(
-												format!("Failed to send jump-to-page to renderer: {e}")
-											)));
-										}
-
-										if let Err(e) = to_converter.send(ConverterMsg::GoToPage(page_index)) {
-											tui.set_msg(MessageSetting::Some(BottomMessage::Error(
-												format!("Failed to send jump-to-page to converter: {e}")
-											)));
-										}
+										to_renderer.send(RenderNotif::JumpToPage(page_index))?;
+										to_converter.send(ConverterMsg::GoToPage(page_index))?;
 									}
 									Ok(Ok(None)) => {},
 									Ok(Err(err_str)) => {

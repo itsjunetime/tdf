@@ -43,6 +43,7 @@ rayon = { version = "*", default-features = false }
 # kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
 kittage = { git = "https://github.com/itsjunetime/kittage.git", features = ["crossterm-tokio", "image-crate", "log"] }
 memmap2 = "*"
+csscolorparser = { version = "0.8.0", default-features = false }
 
 # logging
 log = "0.4.27"
@@ -50,7 +51,6 @@ flexi_logger = "0.31"
 
 # for tracing with tokio-console
 console-subscriber = { version = "0.5.0", optional = true }
-csscolorparser = { version = "0.7.0" }
 
 [profile.production]
 inherits = "release"

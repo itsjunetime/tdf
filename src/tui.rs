@@ -700,9 +700,11 @@ impl Tui {
 						None
 					}
 					KeyCode::Right => self.change_page(PageChange::Next, ChangeAmount::Single),
-					KeyCode::Down => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
+					KeyCode::Down | KeyCode::PageDown =>
+						self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
 					KeyCode::Left => self.change_page(PageChange::Prev, ChangeAmount::Single),
-					KeyCode::Up => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
+					KeyCode::Up | KeyCode::PageUp =>
+						self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
 					KeyCode::Esc => match (self.showing_help_msg, &self.bottom_msg) {
 						(false, BottomMessage::Help) => Some(InputAction::QuitApp),
 						_ => {

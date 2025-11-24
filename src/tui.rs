@@ -281,7 +281,7 @@ impl Tui {
 			// here we calculate how many pages can fit in the available area.
 			let mut test_area_w = img_area.width;
 			// go through our pages, starting at the first one we want to view
-			let mut page_widths = self.rendered[self.page..]
+			let mut page_sizes = self.rendered[self.page..]
 				.iter_mut()
 				// and get this to represent a count of how many we're looking at so far to render
 				.enumerate()
@@ -294,9 +294,14 @@ impl Tui {
 					take
 				})
 				// and map it to their width (in cells on the terminal, not pixels)
-				.filter_map(|(_, page)| page.img.as_mut().map(|img| (img.w_h().0, img)))
+				.filter_map(|(_, page)| {
+					page.img.as_mut().map(|img| {
+						let (w, h) = img.w_h();
+						(w, h, img)
+					})
+				})
 				// and then take them as long as they won't overflow the available area.
-				.take_while(|(width, _)| match test_area_w.checked_sub(*width) {
+				.take_while(|(width, _, _)| match test_area_w.checked_sub(*width) {
 					Some(new_val) => {
 						test_area_w = new_val;
 						true
@@ -306,28 +311,35 @@ impl Tui {
 				.collect::<Vec<_>>();
 
 			if self.page_constraints.r_to_l {
-				page_widths.reverse();
+				page_sizes.reverse();
 			}
 
-			if page_widths.is_empty() {
+			if page_sizes.is_empty() {
 				// If none are ready to render, just show the loading thing
 				Self::render_loading_in(frame, img_area);
 				KittyDisplay::ClearImages
 			} else {
 				execute!(stdout(), BeginSynchronizedUpdate).unwrap();
 
-				let total_width = page_widths.iter().map(|(w, _)| w).sum::<u16>();
+				let total_width = page_sizes.iter().map(|(w, _, _)| w).sum::<u16>();
 
-				self.last_render.pages_shown = page_widths.len();
+				self.last_render.pages_shown = page_sizes.len();
 
 				let unused_width = img_area.width - total_width;
 				self.last_render.unused_width = unused_width;
 				img_area.x += unused_width / 2;
 
-				let to_display = page_widths
+				if let Some(total_height) = page_sizes.iter().map(|(_, h, _)| h).max() {
+					// This subtraction might sporadicly fail while shrinking the window.
+					if let Some(unused_height) = img_area.height.checked_sub(*total_height) {
+						img_area.y += unused_height / 2;
+					}
+				}
+
+				let to_display = page_sizes
 					.into_iter()
 					.enumerate()
-					.filter_map(|(idx, (width, img))| {
+					.filter_map(|(idx, (width, _, img))| {
 						let maybe_img =
 							Self::render_single_page(frame, img, Rect { width, ..img_area });
 						img_area.x += width;

@@ -5,6 +5,7 @@
 - Fix cropping issues when zooming out too much while using kitty protocol
 - Added `gg` and `G` keybindings for scrolling to the top and bottom of a page, respectively, when filling the width of the screen with kitty
 - Updated help page to only show kitty keybindings when you're actually using kitty
+- Map page-up and page-down keybindings to do the same thing as up-key and down-key
 
 # v0.4.3
 

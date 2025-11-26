@@ -13,7 +13,7 @@ use tdf::{
 pub fn handle_renderer_msg(
 	msg: Result<RenderInfo, RenderError>,
 	pages: &mut Vec<Option<ConvertedPage>>,
-	to_converter_tx: &mut Sender<tdf::converter::ConverterMsg>
+	to_converter_tx: &Sender<tdf::converter::ConverterMsg>
 ) {
 	match msg {
 		Ok(RenderInfo::NumPages(num)) => {
@@ -30,7 +30,7 @@ pub fn handle_renderer_msg(
 pub fn handle_converter_msg(
 	msg: Result<ConvertedPage, RenderError>,
 	pages: &mut [Option<ConvertedPage>],
-	to_converter_tx: &mut Sender<ConverterMsg>
+	to_converter_tx: &Sender<ConverterMsg>
 ) {
 	let page = msg.expect("Got error from converter");
 	let num = page.num;
@@ -106,7 +106,9 @@ pub fn start_rendering_loop(
 	(from_render_rx, to_render_tx)
 }
 
+#[must_use]
 pub fn start_converting_loop(
+	proto: ProtocolType,
 	prerender: usize
 ) -> (
 	RecvStream<'static, Result<ConvertedPage, RenderError>>,
@@ -116,7 +118,7 @@ pub fn start_converting_loop(
 	let (to_main_tx, from_converter_rx) = unbounded();
 
 	let mut picker = Picker::from_fontsize(FONT_SIZE);
-	picker.set_protocol_type(ProtocolType::Kitty);
+	picker.set_protocol_type(proto);
 
 	tokio::spawn(run_conversion_loop(
 		to_main_tx,
@@ -131,9 +133,14 @@ pub fn start_converting_loop(
 	(from_converter_rx, to_converter_tx)
 }
 
-pub fn start_all_rendering(path: impl AsRef<Path>, black: i32, white: i32) -> RenderState {
+pub fn start_all_rendering(
+	path: impl AsRef<Path>,
+	black: i32,
+	white: i32,
+	proto: ProtocolType
+) -> RenderState {
 	let (from_render_rx, to_render_tx) = start_rendering_loop(path, black, white);
-	let (from_converter_rx, to_converter_tx) = start_converting_loop(20);
+	let (from_converter_rx, to_converter_tx) = start_converting_loop(proto, 20);
 
 	let pages: Vec<Option<ConvertedPage>> = Vec::new();
 
@@ -146,14 +153,20 @@ pub fn start_all_rendering(path: impl AsRef<Path>, black: i32, white: i32) -> Re
 	}
 }
 
-pub async fn render_doc(path: impl AsRef<Path>, search_term: Option<&str>, black: i32, white: i32) {
+pub async fn render_doc(
+	path: impl AsRef<Path>,
+	search_term: Option<&str>,
+	black: i32,
+	white: i32,
+	proto: ProtocolType
+) {
 	let RenderState {
 		mut from_render_rx,
 		mut from_converter_rx,
 		mut pages,
-		mut to_converter_tx,
+		to_converter_tx,
 		to_render_tx
-	} = start_all_rendering(path, black, white);
+	} = start_all_rendering(path, black, white, proto);
 
 	if let Some(term) = search_term {
 		to_render_tx
@@ -164,10 +177,10 @@ pub async fn render_doc(path: impl AsRef<Path>, search_term: Option<&str>, black
 	while pages.is_empty() || pages.iter().any(Option::is_none) {
 		tokio::select! {
 			Some(renderer_msg) = from_render_rx.next() => {
-				handle_renderer_msg(renderer_msg, &mut pages, &mut to_converter_tx);
+				handle_renderer_msg(renderer_msg, &mut pages, &to_converter_tx);
 			},
 			Some(converter_msg) = from_converter_rx.next() => {
-				handle_converter_msg(converter_msg, &mut pages, &mut to_converter_tx);
+				handle_converter_msg(converter_msg, &mut pages, &to_converter_tx);
 			}
 		}
 	}

@@ -1,19 +1,19 @@
 use std::{
-	num::{NonZeroU32, NonZeroUsize},
+	num::NonZeroUsize,
 	time::{SystemTime, UNIX_EPOCH}
 };
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
-use futures_util::stream::StreamExt;
+use futures_util::stream::StreamExt as _;
 use image::DynamicImage;
-use kittage::NumberOrId;
+use kittage::{NumberOrId, action::NONZERO_ONE};
 use ratatui::layout::Rect;
 use ratatui_image::{
 	Resize,
 	picker::{Picker, ProtocolType},
 	protocol::Protocol
 };
-use rayon::iter::ParallelIterator;
+use rayon::iter::ParallelIterator as _;
 
 use crate::{
 	renderer::{PageInfo, RenderError, fill_default},
@@ -37,6 +37,7 @@ pub enum ConvertedImage {
 }
 
 impl ConvertedImage {
+	#[must_use]
 	pub fn w_h(&self) -> (u16, u16) {
 		match self {
 			Self::Generic(prot) => {
@@ -67,7 +68,7 @@ pub enum ConverterMsg {
 pub async fn run_conversion_loop(
 	sender: Sender<Result<ConvertedPage, RenderError>>,
 	receiver: Receiver<ConverterMsg>,
-	mut picker: Picker,
+	picker: Picker,
 	prerender: usize,
 	shms_work: bool
 ) -> Result<(), SendError<Result<ConvertedPage, RenderError>>> {
@@ -77,7 +78,7 @@ pub async fn run_conversion_loop(
 
 	fn next_page(
 		images: &mut [Option<PageInfo>],
-		picker: &mut Picker,
+		picker: &Picker,
 		page: usize,
 		iteration: &mut usize,
 		prerender: usize,
@@ -126,7 +127,7 @@ pub async fn run_conversion_loop(
 						.for_each(|(_, _, px)| px.0[2] = px.0[2].saturating_sub(u8::MAX / 2));
 				},
 			_ => unreachable!()
-		};
+		}
 
 		let img_area = Rect {
 			width: page_info.img_data.cell_w,
@@ -140,18 +141,20 @@ pub async fn run_conversion_loop(
 				let rn = SystemTime::now()
 					.duration_since(UNIX_EPOCH)
 					.unwrap_or_default()
-					.as_millis() % 1_000_000;
+					.as_nanos() % 1_000_000;
 
 				let mut img = if shms_work {
-					kittage::image::Image::shm_from(dyn_img, &format!("tdf_{pid}_{rn}_{page_num}"))
+					kittage::image::Image::shm_from(dyn_img, &format!("/tdf_{pid}_{rn}_{page_num}"))
 						.map_err(|e| {
-							RenderError::Converting(format!("Couldn't write to shm: {e}"))
+							RenderError::Converting(format!("Couldn't write to shm: {e:?}"))
 						})?
 				} else {
 					kittage::image::Image::from(dyn_img)
 				};
 
-				img.num_or_id = NumberOrId::Id(NonZeroU32::new(page_num as u32 + 1).unwrap());
+				// if ur pdf has 4 billion pages then you deserve to suffer
+				img.num_or_id = NumberOrId::Id(NONZERO_ONE.saturating_add(page_num as u32));
+
 				ConvertedImage::Kitty {
 					img: MaybeTransferred::NotYet(img),
 					cell_w: page_info.img_data.cell_w,
@@ -214,7 +217,7 @@ pub async fn run_conversion_loop(
 
 			match next_page(
 				&mut images,
-				&mut picker,
+				&picker,
 				page,
 				&mut iteration,
 				prerender,

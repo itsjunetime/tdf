@@ -7,6 +7,7 @@ pub struct Skip {
 }
 
 impl Skip {
+	#[must_use]
 	pub fn new(skip: bool) -> Self {
 		Self { skip }
 	}
@@ -45,6 +46,7 @@ impl InterleavedAroundWithMax {
 	/// the following must hold or else this is liable to panic or produce nonsense values:
 	/// - inclusive_min < exclusive_max
 	/// - inclusive_min <= around <= exclusive_max
+	#[must_use]
 	pub fn new(around: usize, inclusive_min: usize, exclusive_max: NonZeroUsize) -> Self {
 		Self {
 			around,

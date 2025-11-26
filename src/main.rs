@@ -5,7 +5,7 @@ use core::{
 use std::{
 	borrow::Cow,
 	ffi::OsString,
-	io::{BufReader, Read, Stdout, Write, stdout},
+	io::{BufReader, Read as _, Stdout, Write as _, stdout},
 	path::PathBuf
 };
 
@@ -19,13 +19,13 @@ use crossterm::{
 };
 use flexi_logger::FileSpec;
 use flume::{Sender, r#async::RecvStream};
-use futures_util::{FutureExt, stream::StreamExt};
+use futures_util::{FutureExt as _, stream::StreamExt as _};
 use kittage::{
 	action::Action,
 	delete::{ClearOrDelete, DeleteConfig, WhichToDelete},
 	error::{TerminalError, TransmitError}
 };
-use notify::{Event, EventKind, RecursiveMode, Watcher};
+use notify::{Event, EventKind, RecursiveMode, Watcher as _};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use ratatui_image::{
 	FontSize,
@@ -57,23 +57,25 @@ impl std::fmt::Debug for WrappedErr {
 impl std::error::Error for WrappedErr {}
 
 fn reset_term() {
+	_ = disable_raw_mode();
 	_ = execute!(
 		std::io::stdout(),
 		LeaveAlternateScreen,
 		crossterm::cursor::Show,
 		crossterm::event::DisableMouseCapture
-	)
+	);
 }
 
 #[tokio::main]
 async fn main() -> Result<(), WrappedErr> {
-	inner_main().await.inspect_err(|_| reset_term())
+	let result = inner_main().await;
+	reset_term();
+	result
 }
 
 async fn inner_main() -> Result<(), WrappedErr> {
 	let hook = std::panic::take_hook();
 	std::panic::set_hook(Box::new(move |info| {
-		_ = disable_raw_mode();
 		reset_term();
 		hook(info);
 	}));
@@ -135,10 +137,8 @@ async fn inner_main() -> Result<(), WrappedErr> {
 
 	// need to keep it around throughout the lifetime of the program, but don't rly need to use it.
 	// Just need to make sure it doesn't get dropped yet.
-	let mut maybe_logger = None;
-
-	if std::env::var("RUST_LOG").is_ok() {
-		maybe_logger = Some(
+	let maybe_logger = if std::env::var("RUST_LOG").is_ok() {
+		Some(
 			flexi_logger::Logger::try_with_env()
 				.map_err(|e| WrappedErr(format!("Couldn't create initial logger: {e}").into()))?
 				.log_to_file(FileSpec::try_from("./debug.log").map_err(|e| {
@@ -146,8 +146,10 @@ async fn inner_main() -> Result<(), WrappedErr> {
 				})?)
 				.start()
 				.map_err(|e| WrappedErr(format!("Can't start logger: {e}").into()))?
-		);
-	}
+		)
+	} else {
+		None
+	};
 
 	let (watch_to_render_tx, render_rx) = flume::unbounded();
 	let to_renderer = watch_to_render_tx.clone();
@@ -159,7 +161,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		watch_to_tui_tx,
 		watch_to_render_tx,
 		path.file_name()
-			.ok_or(WrappedErr("Path does not have a last component??".into()))?
+			.ok_or_else(|| WrappedErr("Path does not have a last component??".into()))?
 			.to_owned()
 	))
 	.map_err(|e| WrappedErr(format!("Couldn't start watching the provided file: {e}").into()))?;
@@ -331,17 +333,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		)
 	})?;
 
-	execute!(
-		term.backend_mut(),
-		LeaveAlternateScreen,
-		crossterm::cursor::Show,
-		crossterm::event::DisableMouseCapture
-	)
-	.unwrap();
-	disable_raw_mode().unwrap();
-
 	drop(maybe_logger);
-
 	Ok(())
 }
 
@@ -550,18 +542,18 @@ fn get_font_size_through_stdio() -> Result<(u16, u16), WrappedErr> {
 		));
 	};
 
-	let h = h.parse::<u16>().map_err(|_| {
+	let h = h.parse::<u16>().map_err(|e| {
 		WrappedErr(
 			format!(
-				"Your terminal said its height is {h}, but that is not a 16-bit unsigned integer"
+				"Your terminal said its height is {h}, but that is not a 16-bit unsigned integer: {e}"
 			)
 			.into()
 		)
 	})?;
-	let w = w.parse::<u16>().map_err(|_| {
+	let w = w.parse::<u16>().map_err(|e| {
 		WrappedErr(
 			format!(
-				"Your terminal said its width is {w}, but that is not a 16-bit unsigned integer"
+				"Your terminal said its width is {w}, but that is not a 16-bit unsigned integer: {e}"
 			)
 			.into()
 		)

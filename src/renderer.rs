@@ -78,7 +78,7 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 // We're allowing passing by value here because this is only called once, at the beginning of the
 // program, and the arguments that 'should' be passed by value (`receiver` and `size`) would
 // probably be more performant if accessed by-value instead of through a reference. Probably.
-#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+#[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub fn start_rendering(
 	path: &str,
 	sender: Sender<Result<RenderInfo, RenderError>>,
@@ -116,7 +116,7 @@ pub fn start_rendering(
 						// temporarily removed to facilitate a save or something like that)
 						while let Ok(msg) = receiver.recv() {
 							// and once that comes, just try to reload again
-							if let RenderNotif::Reload = msg {
+							if matches!(msg, RenderNotif::Reload) {
 								continue 'reload;
 							}
 						}
@@ -313,7 +313,7 @@ pub fn start_rendering(
 						if let Err(e) = ctx.pixmap.write_to(&mut pixels, mupdf::ImageFormat::PNM) {
 							sender.send(Err(RenderError::Doc(e)))?;
 							continue;
-						};
+						}
 
 						log::debug!("got pixmap for page {page_num} with WxH {w}x{h}");
 
@@ -341,7 +341,7 @@ pub fn start_rendering(
 					Err(TryRecvError::Disconnected) => return Ok(()),
 					Ok(notif) => handle_notif!(notif),
 					Err(TryRecvError::Empty) => ()
-				};
+				}
 			}
 
 			// Now, if we have a search term, we want to look through the rest of the document past
@@ -434,7 +434,7 @@ pub fn start_rendering(
 				return Ok(());
 			};
 
-			handle_notif!(msg)
+			handle_notif!(msg);
 		}
 	}
 }
@@ -565,7 +565,7 @@ struct PopOnNext<'a> {
 	inner: &'a mut VecDeque<usize>
 }
 
-impl<'a> Iterator for PopOnNext<'a> {
+impl Iterator for PopOnNext<'_> {
 	type Item = usize;
 	fn next(&mut self) -> Option<Self::Item> {
 		self.inner.pop_front()

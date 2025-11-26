@@ -1,3 +1,5 @@
+use ratatui_image::picker::ProtocolType;
+
 mod utils;
 
 const BLACK: i32 = 0;
@@ -12,5 +14,5 @@ async fn main() {
 		.nth(1)
 		.expect("Please enter a file to profile");
 
-	utils::render_doc(file, None, BLACK, WHITE).await;
+	utils::render_doc(file, None, BLACK, WHITE, ProtocolType::Kitty).await;
 }

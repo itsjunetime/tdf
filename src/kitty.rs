@@ -60,8 +60,8 @@ impl<W: Write> Write for DbgWriter<W> {
 	}
 }
 
-pub async fn run_action<'image, 'data, 'es>(
-	action: Action<'image, 'data>,
+pub async fn run_action<'es>(
+	action: Action<'_, '_>,
 	ev_stream: &'es mut EventStream
 ) -> Result<ImageId, TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>> {
 	let writer = DbgWriter {

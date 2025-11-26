@@ -1313,12 +1313,11 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "http"
-version = "1.3.1"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4a85d31aea989eead29a3aaf9e1115a180df8282431156e533de47660892565"
+checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
 dependencies = [
  "bytes",
- "fnv",
  "itoa",
 ]
 
@@ -1600,10 +1599,10 @@ dependencies = [
 
 [[package]]
 name = "kittage"
-version = "0.1.0"
-source = "git+https://github.com/itsjunetime/kittage.git#0ec72474513721f9960332067fd740afab3ed255"
+version = "0.1.1"
+source = "git+https://github.com/itsjunetime/kittage.git#fbd2a7d42296771e044575c009ee34616a3964e5"
 dependencies = [
- "base64 0.22.1",
+ "base64-simd",
  "crossterm",
  "futures-core",
  "image",
@@ -2427,9 +2426,9 @@ dependencies = [
 
 [[package]]
 name = "psx-shm"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "562d6abd69b7d14272c59b72b14e3ff058232197ac0846480d58f047140ce1a2"
+checksum = "b9d9d53299b024cf527e0cdc4e871cee6e7aa28955c1214b78799804102a2e3d"
 dependencies = [
  "memmap2",
  "rustix",
@@ -3944,18 +3943,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.28"
+version = "0.8.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43fa6694ed34d6e57407afbccdeecfa268c470a7d2a5b0cf49ce9fcc345afb90"
+checksum = "4ea879c944afe8a2b25fef16bb4ba234f47c694565e97383b36f3a878219065c"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.28"
+version = "0.8.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c640b22cd9817fae95be82f0d2f90b11f7605f6c319d16705c459b27ac2cbc26"
+checksum = "cf955aa904d6040f70dc8e9384444cb1030aed272ba3cb09bbc4ab9e7c1f34f5"
 dependencies = [
  "proc-macro2",
  "quote",

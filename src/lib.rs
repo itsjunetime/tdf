@@ -27,6 +27,7 @@ pub struct ScaledResult {
 	scale_factor: f32
 }
 
+#[must_use]
 pub fn scale_img_for_area(
 	(img_width, img_height): (f32, f32),
 	(area_width, area_height): (f32, f32),

@@ -1,17 +1,15 @@
 mod utils;
 
-use std::{
-	hint::black_box,
-	path::Path,
-	time::{SystemTime, UNIX_EPOCH}
-};
+use std::{hint::black_box, path::Path};
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main, profiler::Profiler};
-use futures_util::StreamExt;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use futures_util::StreamExt as _;
+use ratatui_image::picker::ProtocolType;
 use tdf::{
 	converter::{ConvertedPage, ConverterMsg},
 	renderer::{PageInfo, RenderInfo, fill_default}
 };
+use tokio::runtime::Runtime;
 use utils::{
 	RenderState, handle_converter_msg, handle_renderer_msg, render_doc, start_all_rendering,
 	start_converting_loop, start_rendering_loop
@@ -23,90 +21,103 @@ const FILES: [&str; 3] = [
 	"benches/geotopo.pdf"
 ];
 
+const PROTOS: [ProtocolType; 3] = [
+	ProtocolType::Kitty,
+	ProtocolType::Sixel,
+	ProtocolType::Iterm2
+];
+
 const BLACK: i32 = 0;
 const WHITE: i32 = i32::from_be_bytes([0, 0xff, 0xff, 0xff]);
 
-fn render_full(c: &mut Criterion) {
-	for file in FILES {
-		c.bench_with_input(BenchmarkId::new("render_full", file), &file, |b, &file| {
-			b.to_async(tokio::runtime::Runtime::new().unwrap())
-				.iter(|| render_doc(file, None, BLACK, WHITE))
-		});
+fn for_all_combos(
+	name: &'static str,
+	mut f: impl FnMut(&Runtime, BenchmarkId, &'static str, ProtocolType)
+) {
+	let rt = tokio::runtime::Runtime::new().unwrap();
+	for proto in PROTOS {
+		for file in FILES {
+			f(
+				&rt,
+				BenchmarkId::new(name, format!("{file},{proto:?}")),
+				file,
+				proto
+			);
+		}
 	}
+}
+
+fn render_full(c: &mut Criterion) {
+	for_all_combos("render_full", |rt, id, file, proto| {
+		_ = c.bench_with_input(id, &file, |b, &file| {
+			b.to_async(rt)
+				.iter(|| render_doc(file, None, BLACK, WHITE, proto));
+		});
+	});
 }
 
 fn render_to_first_page(c: &mut Criterion) {
-	for file in FILES {
-		c.bench_with_input(
-			BenchmarkId::new("render_first_page", file),
-			&file,
-			|b, &file| {
-				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter(|| render_first_page(file, BLACK, WHITE))
-			}
-		);
-	}
+	for_all_combos("render_first_page", |rt, id, file, proto| {
+		c.bench_with_input(id, &file, |b, &file| {
+			b.to_async(rt)
+				.iter(|| render_first_page(file, BLACK, WHITE, proto));
+		});
+	});
 }
 
 fn only_converting(c: &mut Criterion) {
-	for file in FILES {
-		let runtime = tokio::runtime::Runtime::new().unwrap();
-		let all_rendered = runtime.block_on(render_all_files(file, BLACK, WHITE));
+	for_all_combos("only_converting", |rt, id, file, proto| {
+		let all_rendered = rt.block_on(render_all_files(file, BLACK, WHITE));
 
-		c.bench_with_input(
-			BenchmarkId::new("only_converting", file),
-			&(all_rendered, file),
-			|b, (rendered, _)| {
-				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter_with_setup(|| rendered.clone(), convert_all_files)
-			}
-		);
-	}
+		c.bench_with_input(id, &all_rendered, |b, rendered| {
+			b.to_async(rt)
+				.iter_with_setup(|| rendered.clone(), |f| convert_all_files(f, proto));
+		});
+	});
 }
 
+/*
 fn search_short_common(c: &mut Criterion) {
-	for file in FILES {
-		c.bench_with_input(
-			BenchmarkId::new("search_short_common", file),
-			&file,
-			|b, &file| {
-				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter(|| render_doc(file, Some("an"), BLACK, WHITE))
-			}
-		);
-	}
+	for_all_combos("search_short_common", |rt, id, file, proto| {
+		c.bench_with_input(id, &file, |b, &file| {
+			b.to_async(rt)
+				.iter(|| render_doc(file, Some("an"), BLACK, WHITE, proto))
+		});
+	});
 }
 
 fn search_long_rare(c: &mut Criterion) {
-	for file in FILES {
-		c.bench_with_input(
-			BenchmarkId::new("search_long_rare", file),
-			&file,
-			|b, &file| {
-				b.to_async(tokio::runtime::Runtime::new().unwrap())
-					.iter(|| render_doc(file, Some("this is long and rare"), BLACK, WHITE))
-			}
-		);
-	}
+	for_all_combos("search_long_rare", |rt, id, file, proto| {
+		c.bench_with_input(id, &file, |b, &file| {
+			b.to_async(rt)
+				.iter(|| render_doc(file, Some("this is long and rare"), BLACK, WHITE, proto))
+		});
+	});
 }
+*/
 
-pub async fn render_first_page(path: impl AsRef<Path>, black: i32, white: i32) {
+pub async fn render_first_page(
+	path: impl AsRef<Path>,
+	black: i32,
+	white: i32,
+	proto: ProtocolType
+) {
 	let RenderState {
 		mut from_render_rx,
 		mut from_converter_rx,
 		mut pages,
-		mut to_converter_tx,
+		to_converter_tx,
 		to_render_tx
-	} = start_all_rendering(path, black, white);
+	} = start_all_rendering(path, black, white, proto);
 
 	// we only want to render until the first page is ready to be printed
 	while pages.iter().all(Option::is_none) {
 		tokio::select! {
 			Some(renderer_msg) = from_render_rx.next() => {
-				handle_renderer_msg(renderer_msg, &mut pages, &mut to_converter_tx);
+				handle_renderer_msg(renderer_msg, &mut pages, &to_converter_tx);
 			},
 			Some(converter_msg) = from_converter_rx.next() => {
-				handle_converter_msg(converter_msg, &mut pages, &mut to_converter_tx);
+				handle_converter_msg(converter_msg, &mut pages, &to_converter_tx);
 			}
 		}
 	}
@@ -129,7 +140,7 @@ async fn render_all_files(path: &'static str, black: i32, white: i32) -> Vec<Pag
 				let num = page.page_num;
 				pages[num] = Some(page);
 			}
-		};
+		}
 
 		if pages.iter().all(Option::is_some) {
 			break;
@@ -140,9 +151,9 @@ async fn render_all_files(path: &'static str, black: i32, white: i32) -> Vec<Pag
 	pages.into_iter().flatten().collect()
 }
 
-async fn convert_all_files(files: Vec<PageInfo>) {
+async fn convert_all_files(files: Vec<PageInfo>, proto: ProtocolType) {
 	let num_files = files.len();
-	let (mut from_converter_rx, to_converter_tx) = start_converting_loop(num_files);
+	let (mut from_converter_rx, to_converter_tx) = start_converting_loop(proto, num_files);
 
 	to_converter_tx
 		.send(ConverterMsg::NumPages(num_files))
@@ -181,10 +192,12 @@ async fn convert_all_files(files: Vec<PageInfo>) {
 	black_box(converted);
 }
 
+/*
 struct CpuProfiler;
 
-impl Profiler for CpuProfiler {
+impl criterion::profiler::Profiler for CpuProfiler {
 	fn start_profiling(&mut self, benchmark_id: &str, _: &std::path::Path) {
+		use std::time::{SystemTime, UNIX_EPOCH}
 		let file = format!(
 			"./{}-{}.profile",
 			benchmark_id.replace('/', "-"),
@@ -200,10 +213,13 @@ impl Profiler for CpuProfiler {
 		cpuprofiler::PROFILER.lock().unwrap().stop().unwrap();
 	}
 }
+*/
 
 criterion_group!(
 	name = benches;
-	config = Criterion::default().sample_size(40).with_profiler(CpuProfiler);
-	targets = render_full, render_to_first_page, only_converting, search_short_common, search_long_rare
+	// config = Criterion::default().sample_size(40).with_profiler(CpuProfiler);
+	config = Criterion::default().sample_size(40);
+	// targets = render_full, render_to_first_page, only_converting, search_short_common, search_long_rare
+	targets = render_full, render_to_first_page, only_converting
 );
 criterion_main!(benches);

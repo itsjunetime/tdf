@@ -109,7 +109,8 @@ pub struct RenderLayout {
 }
 
 impl Tui {
-	pub fn new(name: String, max_wide: Option<NonZeroUsize>, r_to_l: bool, is_kitty: bool) -> Tui {
+	#[must_use]
+	pub fn new(name: String, max_wide: Option<NonZeroUsize>, r_to_l: bool, is_kitty: bool) -> Self {
 		Self {
 			name,
 			page: 0,
@@ -124,6 +125,7 @@ impl Tui {
 		}
 	}
 
+	#[must_use]
 	pub fn main_layout(frame: &Frame<'_>, fullscreened: bool) -> RenderLayout {
 		if fullscreened {
 			RenderLayout {
@@ -276,7 +278,7 @@ impl Tui {
 						}
 					}]);
 				}
-			};
+			}
 
 			// here we calculate how many pages can fit in the available area.
 			let mut test_area_w = img_area.width;
@@ -383,12 +385,13 @@ impl Tui {
 	}
 
 	fn render_loading_in(frame: &mut Frame<'_>, area: Rect) {
-		let loading_str = "Loading...";
-		let inner_space = Layout::horizontal([Constraint::Length(loading_str.len() as u16)])
-			.flex(Flex::Center)
-			.split(area);
+		const LOADING_STR: &str = "Loading...";
+		let inner_space =
+			Layout::horizontal([Constraint::Length(const { LOADING_STR.len() as u16 })])
+				.flex(Flex::Center)
+				.split(area);
 
-		let loading_span = Span::styled(loading_str, Style::new().fg(Color::Cyan));
+		let loading_span = Span::styled(LOADING_STR, Style::new().fg(Color::Cyan));
 
 		frame.render_widget(loading_span, inner_space[0]);
 	}
@@ -417,6 +420,8 @@ impl Tui {
 			PageChange::Prev => self.set_page(self.page.saturating_sub(diff))
 		}
 
+		// Yes these conversions could wrap around if you have > isize::MAX pages, but we already
+		// decided that you deserve to suffer if you have more than u32::MAX pages, so that's fine.
 		match self.page as isize - old as isize {
 			0 => None,
 			_ => Some(InputAction::JumpingToPage(self.page))
@@ -550,17 +555,11 @@ impl Tui {
 	}
 
 	pub fn handle_event(&mut self, ev: &Event) -> Option<InputAction> {
-		fn jump_to_page(
-			page: &mut usize,
-			rect: &mut Rect,
-			new_page: Option<usize>
-		) -> Option<InputAction> {
-			new_page.map(|new_page| {
-				*page = new_page;
-				// Make sure we re-render
-				*rect = Rect::default();
-				InputAction::JumpingToPage(new_page)
-			})
+		fn jump_to_page(page: &mut usize, rect: &mut Rect, new_page: usize) -> InputAction {
+			*page = new_page;
+			// Make sure we re-render
+			*rect = Rect::default();
+			InputAction::JumpingToPage(new_page)
 		}
 
 		match ev {
@@ -617,30 +616,38 @@ impl Tui {
 							'n' if self.page < self.rendered.len() - 1 => {
 								// TODO: If we can't find one, then maybe like block until we've verified
 								// all the pages have been checked?
-								let next_page = self.rendered[(self.page + 1)..]
+								self.rendered[(self.page + 1)..]
 									.iter()
 									.enumerate()
 									.find_map(|(idx, p)| {
 										p.num_results
 											.is_some_and(|num| num > 0)
 											.then_some(self.page + 1 + idx)
-									});
-
-								jump_to_page(&mut self.page, &mut self.last_render.rect, next_page)
+									})
+									.map(|next_page| {
+										jump_to_page(
+											&mut self.page,
+											&mut self.last_render.rect,
+											next_page
+										)
+									})
 							}
-							'N' if self.page > 0 => {
-								let prev_page = self.rendered[..(self.page)]
-									.iter()
-									.rev()
-									.enumerate()
-									.find_map(|(idx, p)| {
-										p.num_results
-											.is_some_and(|num| num > 0)
-											.then_some(self.page - (idx + 1))
-									});
-
-								jump_to_page(&mut self.page, &mut self.last_render.rect, prev_page)
-							}
+							'N' if self.page > 0 => self.rendered[..(self.page)]
+								.iter()
+								.rev()
+								.enumerate()
+								.find_map(|(idx, p)| {
+									p.num_results
+										.is_some_and(|num| num > 0)
+										.then_some(self.page - (idx + 1))
+								})
+								.map(|prev_page| {
+									jump_to_page(
+										&mut self.page,
+										&mut self.last_render.rect,
+										prev_page
+									)
+								}),
 							'z' if key.modifiers.contains(KeyModifiers::CONTROL) => {
 								// [todo] better error handling here?
 
@@ -686,16 +693,16 @@ impl Tui {
 							'O' if self.is_kitty =>
 								self.update_zoom(|z| z.level = z.level.saturating_sub(1)),
 							'L' if self.is_kitty => self.update_zoom(|z| {
-								z.cell_pan_from_left = z.cell_pan_from_left.saturating_add(1)
+								z.cell_pan_from_left = z.cell_pan_from_left.saturating_add(1);
 							}),
 							'H' if self.is_kitty => self.update_zoom(|z| {
-								z.cell_pan_from_left = z.cell_pan_from_left.saturating_sub(1)
+								z.cell_pan_from_left = z.cell_pan_from_left.saturating_sub(1);
 							}),
 							'J' if self.is_kitty => self.update_zoom(|z| {
-								z.cell_pan_from_top = z.cell_pan_from_top.saturating_add(1)
+								z.cell_pan_from_top = z.cell_pan_from_top.saturating_add(1);
 							}),
 							'K' if self.is_kitty => self.update_zoom(|z| {
-								z.cell_pan_from_top = z.cell_pan_from_top.saturating_sub(1)
+								z.cell_pan_from_top = z.cell_pan_from_top.saturating_sub(1);
 							}),
 							'G' if self.is_kitty =>
 								self.update_zoom(|z| z.cell_pan_from_top = u16::MAX),
@@ -819,7 +826,7 @@ impl Tui {
 	#[expect(clippy::unnecessary_wraps)]
 	fn update_zoom(&mut self, f: impl FnOnce(&mut Zoom)) -> Option<InputAction> {
 		if let Some(z) = &mut self.zoom {
-			f(z)
+			f(z);
 		}
 		self.last_render.rect = Rect::default();
 		Some(InputAction::Redraw)

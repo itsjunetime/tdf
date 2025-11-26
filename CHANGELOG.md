@@ -7,6 +7,7 @@
 - Updated help page to only show kitty keybindings when you're actually using kitty
 - Map page-up and page-down keybindings to do the same thing as up-key and down-key (thanks [@maxdexh](https://github.com/maxdexh)!)
 - Vertically center pages within the available space if they are not constrained by the height (thanks [@maxdexh](https://github.com/maxdexh)!)
+- Fixed issue with cooked mode not being restored upon panic/error (thanks [@maxdexh](https://github.com/maxdexh)!)
 
 
 # v0.4.3

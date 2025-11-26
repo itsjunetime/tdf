@@ -73,6 +73,7 @@ async fn main() -> Result<(), WrappedErr> {
 async fn inner_main() -> Result<(), WrappedErr> {
 	let hook = std::panic::take_hook();
 	std::panic::set_hook(Box::new(move |info| {
+		_ = disable_raw_mode();
 		reset_term();
 		hook(info);
 	}));

@@ -811,6 +811,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "debounce"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f2e5bc95e82bd8e9b333f4c5ff6dceab54e2e99f4d8cef2a680d417206ead34"
+
+[[package]]
 name = "deltae"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3020,6 +3026,7 @@ dependencies = [
  "criterion",
  "crossterm",
  "csscolorparser 0.8.0",
+ "debounce",
  "flexi_logger",
  "flume",
  "futures-util",

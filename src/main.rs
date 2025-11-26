@@ -6,7 +6,10 @@ use std::{
 	borrow::Cow,
 	ffi::OsString,
 	io::{BufReader, Read as _, Stdout, Write as _, stdout},
-	path::PathBuf
+	mem,
+	path::PathBuf,
+	sync::{Arc, Mutex},
+	time::Duration
 };
 
 use crossterm::{
@@ -17,6 +20,7 @@ use crossterm::{
 		enable_raw_mode, window_size
 	}
 };
+use debounce::EventDebouncer;
 use flexi_logger::FileSpec;
 use flume::{Sender, r#async::RecvStream};
 use futures_util::{FutureExt as _, stream::StreamExt as _};
@@ -83,6 +87,8 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	#[cfg(feature = "tracing")]
 	console_subscriber::init();
 
+	const DEFAULT_DEBOUNCE_DELAY: Duration = Duration::from_millis(50);
+
 	let flags = xflags::parse_or_exit! {
 		/// Display the pdf with the pages starting at the right hand size and moving left and
 		/// adjust input keys to match
@@ -91,6 +97,9 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		optional -m,--max-wide max_wide: NonZeroUsize
 		/// Fullscreen the pdf (hide document name, page count, etc)
 		optional -f,--fullscreen
+		/// The time to wait for the file to stop changing before reloading, in milliseconds.
+		/// Defaults to 50ms.
+		optional --reload-delay reload_delay: u64
 		/// The number of pages to prerender surrounding the currently-shown page; 0 means no
 		/// limit. By default, there is no limit.
 		optional -p,--prerender prerender: usize
@@ -162,7 +171,10 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		watch_to_render_tx,
 		path.file_name()
 			.ok_or_else(|| WrappedErr("Path does not have a last component??".into()))?
-			.to_owned()
+			.to_owned(),
+		flags
+			.reload_delay
+			.map_or(DEFAULT_DEBOUNCE_DELAY, Duration::from_millis)
 	))
 	.map_err(|e| WrappedErr(format!("Couldn't start watching the provided file: {e}").into()))?;
 
@@ -454,38 +466,58 @@ async fn enter_redraw_loop(
 fn on_notify_ev(
 	to_tui_tx: flume::Sender<Result<RenderInfo, RenderError>>,
 	to_render_tx: flume::Sender<RenderNotif>,
-	file_name: OsString
+	file_name: OsString,
+	debounce_delay: Duration
 ) -> impl Fn(notify::Result<Event>) {
-	move |res| match res {
-		// If we get an error here, and then an error sending, everything's going wrong. Just give
-		// up lol.
-		Err(e) => to_tui_tx.send(Err(RenderError::Notify(e))).unwrap(),
-		// TODO: Should we match EventKind::Rename and propogate that so that the other parts of the
-		// process know that too? Or should that be
-		Ok(ev) => {
-			// We only watch the parent directory (see the comment above `watcher.watch` in `fn
-			// main`) so we need to filter out events to only ones that pertain to the single file
-			// we care about
-			if !ev
-				.paths
-				.iter()
-				.any(|path| path.file_name().is_some_and(|f| f == file_name))
-			{
-				return;
-			}
+	let last_event: Mutex<Result<(), RenderError>> = Mutex::new(Ok(()));
+	let last_event = Arc::new(last_event);
 
-			match ev.kind {
-				EventKind::Access(_) => (),
-				EventKind::Remove(_) => to_tui_tx
-					.send(Err(RenderError::Converting("File was deleted".into())))
-					.unwrap(),
+	let debouncer = EventDebouncer::new(debounce_delay, {
+		let last_event = last_event.clone();
+		move |()| {
+			let event = mem::replace(&mut *last_event.lock().unwrap(), Ok(()));
+			match event {
 				// This shouldn't fail to send unless the receiver gets disconnected. If that's
 				// happened, then like the main thread has panicked or something, so it doesn't matter
 				// we don't handle the error here.
-				EventKind::Other | EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) =>
-					to_render_tx.send(RenderNotif::Reload).unwrap(),
+				Ok(()) => to_render_tx.send(RenderNotif::Reload).unwrap(),
+				// If we get an error here, and then an error sending, everything's going wrong. Just give
+				// up lol.
+				Err(e) => to_tui_tx.send(Err(e)).unwrap()
 			}
 		}
+	});
+
+	move |res| {
+		let event = match res {
+			Err(e) => Err(RenderError::Notify(e)),
+
+			// TODO: Should we match EventKind::Rename and propogate that so that the other parts of the
+			// process know that too? Or should that be
+			Ok(ev) => {
+				// We only watch the parent directory (see the comment above `watcher.watch` in `fn
+				// main`) so we need to filter out events to only ones that pertain to the single file
+				// we care about
+				if !ev
+					.paths
+					.iter()
+					.any(|path| path.file_name().is_some_and(|f| f == file_name))
+				{
+					return;
+				}
+
+				match ev.kind {
+					EventKind::Access(_) => return,
+					EventKind::Remove(_) => Err(RenderError::Converting("File was deleted".into())),
+					EventKind::Other
+					| EventKind::Any
+					| EventKind::Create(_)
+					| EventKind::Modify(_) => Ok(())
+				}
+			}
+		};
+		*last_event.lock().unwrap() = event;
+		debouncer.put(());
 	}
 }
 

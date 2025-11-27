@@ -39,4 +39,6 @@ I dunno. Just for fun, mostly.
 
 Yeah, sure. Please do.
 
-Please note, though, that all contributions will be treated as licensed under MPL-2.0.
+Please note, though, that:
+1. No AI-generated or AI-assisted or AI-viewed or AI-anythinged code will be accepted. "AI" is a plague upon this earth and I won't be caught dead pretending it's normal.
+2. All contributions will be treated as licensed under MPL-2.0 :)

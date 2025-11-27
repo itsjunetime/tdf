@@ -8,6 +8,7 @@
 - Map page-up and page-down keybindings to do the same thing as up-key and down-key (thanks [@maxdexh](https://github.com/maxdexh)!)
 - Vertically center pages within the available space if they are not constrained by the height (thanks [@maxdexh](https://github.com/maxdexh)!)
 - Fixed issue with cooked mode not being restored upon panic/error (thanks [@maxdexh](https://github.com/maxdexh)!)
+- Implemented a debounce for file reload updates to prevent some editors from paralyzing the app due to a flurry of reloads (thanks [@maxdexh](https://github.com/maxdexh))
 
 
 # v0.4.3

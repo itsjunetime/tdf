@@ -220,8 +220,15 @@ impl Tui {
 						img_area.width = img_area
 							.width
 							.saturating_sub((zoom.level * 2).unsigned_abs())
-							.max((f32::from(img_area.height) * img_aspect_ratio) as u16);
-						img_area.x += (old_width - img_area.width) / 2;
+							.max(
+								old_width
+									.min((f32::from(img_area.height) * img_aspect_ratio) as u16)
+							);
+
+						img_area.x += old_width
+							.checked_sub(img_area.width)
+							.expect("Zooming out shrinks the image")
+							/ 2;
 
 						log::debug!("after adjustment, img_area is {img_area:#?}");
 

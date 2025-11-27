@@ -31,6 +31,8 @@ If it turns out that you're missing one of these, it will fail to compile and te
 
 The binary should then be found at `./target/release/tdf`.
 
+You can also pull this in via [radicle](https://radicle.xyz) with `rad clone rad:zb11K1XGfQooopqEfwtCMyvbcyK1`
+
 ## Why in the world would you use this?
 
 I dunno. Just for fun, mostly.

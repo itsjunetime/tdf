@@ -183,190 +183,187 @@ impl Tui {
 			// be written and set to skip it so that ratatui doesn't spend a lot of time diffing it
 			// each re-render
 			frame.render_widget(Skip::new(true), img_area);
-			KittyDisplay::NoChange
-		} else {
-			if let Some(ref mut zoom) = self.zoom {
-				// yes this is ugly and I hate it. it's due to the limitations that currently exist
-				// in the borrow checker. Once `-Zpolonius=next` is stabilized, we can rework this
-				// to look like what we expect.
-				// See https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#problem-case-3-conditional-control-flow-across-functions
-				// You can also rewrite this to just if an `if let` and run it under
-				// `RUSTFLAGS="-Zpolonius=next"` and see that it works
-				if self.rendered[self.page]
-					.img
-					.as_ref()
-					.is_some_and(|c| matches!(c, ConvertedImage::Kitty { .. }))
-				{
-					let Some(ConvertedImage::Kitty {
-						ref mut img,
-						cell_w,
-						cell_h
-					}) = self.rendered[self.page].img
-					else {
-						unreachable!()
+			return KittyDisplay::NoChange;
+		}
+
+		if let Some(ref mut zoom) = self.zoom {
+			// yes this is ugly and I hate it. it's due to the limitations that currently exist
+			// in the borrow checker. Once `-Zpolonius=next` is stabilized, we can rework this
+			// to look like what we expect.
+			// See https://github.com/rust-lang/rfcs/blob/master/text/2094-nll.md#problem-case-3-conditional-control-flow-across-functions
+			// You can also rewrite this to just if an `if let` and run it under
+			// `RUSTFLAGS="-Zpolonius=next"` and see that it works
+			if self.rendered[self.page]
+				.img
+				.as_ref()
+				.is_some_and(|c| matches!(c, ConvertedImage::Kitty { .. }))
+			{
+				let Some(ConvertedImage::Kitty {
+					ref mut img,
+					cell_w,
+					cell_h
+				}) = self.rendered[self.page].img
+				else {
+					unreachable!()
+				};
+
+				log::debug!("zoom is now {zoom:#?}");
+				log::debug!("img_area is {img_area:#?}");
+				log::debug!("img dimensions are {cell_w}x{cell_h}");
+
+				let img_width = f32::from(cell_w);
+				let img_height = f32::from(cell_h);
+
+				let img_aspect_ratio = img_width / img_height;
+
+				if zoom.level < 0 {
+					let old_width = img_area.width;
+					img_area.width = img_area
+						.width
+						.saturating_sub((zoom.level * 2).unsigned_abs())
+						.max(old_width.min((f32::from(img_area.height) * img_aspect_ratio) as u16));
+
+					img_area.x += old_width
+						.checked_sub(img_area.width)
+						.expect("Zooming out shrinks the image")
+						/ 2;
+
+					log::debug!("after adjustment, img_area is {img_area:#?}");
+
+					// TODO: Find a way to detect when we've hit the maximum zoom-out and stop
+					// more zooming out
+				}
+
+				// Ugh I don't like this logic. I wish we could simplify it.
+				let img_area_width = f32::from(img_area.width);
+				let img_area_height = f32::from(img_area.height);
+				let available_to_real_width_ratio = img_area_width / img_width;
+				let available_to_real_height_ratio = img_area_height / img_height;
+
+				let (new_cell_width, new_cell_height) =
+					if available_to_real_width_ratio > available_to_real_height_ratio {
+						(img_width, img_area_height / available_to_real_width_ratio)
+					} else {
+						(img_area_width / available_to_real_height_ratio, img_height)
 					};
 
-					log::debug!("zoom is now {zoom:#?}");
-					log::debug!("img_area is {img_area:#?}");
-					log::debug!("img dimensions are {cell_w}x{cell_h}");
+				log::debug!("new_cell stuff is {new_cell_width}x{new_cell_height}");
 
-					let img_width = f32::from(cell_w);
-					let img_height = f32::from(cell_h);
+				let width = (new_cell_width * f32::from(font_size.0)) as u32;
+				let height = (new_cell_height * f32::from(font_size.1)) as u32;
 
-					let img_aspect_ratio = img_width / img_height;
+				self.last_render = LastRender {
+					rect: size,
+					pages_shown: 1,
+					unused_width: 0
+				};
 
-					if zoom.level < 0 {
-						let old_width = img_area.width;
-						img_area.width = img_area
-							.width
-							.saturating_sub((zoom.level * 2).unsigned_abs())
-							.max(
-								old_width
-									.min((f32::from(img_area.height) * img_aspect_ratio) as u16)
-							);
+				zoom.cell_pan_from_left = zoom
+					.cell_pan_from_left
+					.min(cell_w.saturating_sub(new_cell_width as u16));
+				zoom.cell_pan_from_top = zoom
+					.cell_pan_from_top
+					.min(cell_h.saturating_sub(new_cell_height as u16));
 
-						img_area.x += old_width
-							.checked_sub(img_area.width)
-							.expect("Zooming out shrinks the image")
-							/ 2;
-
-						log::debug!("after adjustment, img_area is {img_area:#?}");
-
-						// TODO: Find a way to detect when we've hit the maximum zoom-out and stop
-						// more zooming out
+				return KittyDisplay::DisplayImages(vec![KittyReadyToDisplay {
+					img,
+					page_num: self.page,
+					pos: Position {
+						x: img_area.x,
+						y: img_area.y
+					},
+					display_loc: DisplayLocation {
+						x: u32::from(zoom.cell_pan_from_left) * u32::from(font_size.0),
+						y: u32::from(zoom.cell_pan_from_top) * u32::from(font_size.1),
+						width,
+						height,
+						columns: img_area.width,
+						rows: img_area.height,
+						..DisplayLocation::default()
 					}
+				}]);
+			}
+		}
 
-					// Ugh I don't like this logic. I wish we could simplify it.
-					let img_area_width = f32::from(img_area.width);
-					let img_area_height = f32::from(img_area.height);
-					let available_to_real_width_ratio = img_area_width / img_width;
-					let available_to_real_height_ratio = img_area_height / img_height;
+		// here we calculate how many pages can fit in the available area.
+		let mut test_area_w = img_area.width;
+		// go through our pages, starting at the first one we want to view
+		let mut page_sizes = self.rendered[self.page..]
+			.iter_mut()
+			// and get this to represent a count of how many we're looking at so far to render
+			.enumerate()
+			// and only take as many as are ready to be rendered
+			.take_while(|(idx, page)| {
+				let mut take = page.img.is_some();
+				if let Some(max) = self.page_constraints.max_wide {
+					take &= *idx < max.get();
+				}
+				take
+			})
+			// and map it to their width (in cells on the terminal, not pixels)
+			.filter_map(|(_, page)| {
+				page.img.as_mut().map(|img| {
+					let (w, h) = img.w_h();
+					(w, h, img)
+				})
+			})
+			// and then take them as long as they won't overflow the available area.
+			.take_while(|(width, _, _)| match test_area_w.checked_sub(*width) {
+				Some(new_val) => {
+					test_area_w = new_val;
+					true
+				}
+				None => false
+			})
+			.collect::<Vec<_>>();
 
-					let (new_cell_width, new_cell_height) =
-						if available_to_real_width_ratio > available_to_real_height_ratio {
-							(img_width, img_area_height / available_to_real_width_ratio)
-						} else {
-							(img_area_width / available_to_real_height_ratio, img_height)
-						};
+		if self.page_constraints.r_to_l {
+			page_sizes.reverse();
+		}
 
-					log::debug!("new_cell stuff is {new_cell_width}x{new_cell_height}");
+		if page_sizes.is_empty() {
+			// If none are ready to render, just show the loading thing
+			Self::render_loading_in(frame, img_area);
+			KittyDisplay::ClearImages
+		} else {
+			execute!(stdout(), BeginSynchronizedUpdate).unwrap();
 
-					let width = (new_cell_width * f32::from(font_size.0)) as u32;
-					let height = (new_cell_height * f32::from(font_size.1)) as u32;
+			let total_width = page_sizes.iter().map(|(w, _, _)| w).sum::<u16>();
 
-					self.last_render = LastRender {
-						rect: size,
-						pages_shown: 1,
-						unused_width: 0
-					};
+			self.last_render.pages_shown = page_sizes.len();
 
-					zoom.cell_pan_from_left = zoom
-						.cell_pan_from_left
-						.min(cell_w.saturating_sub(new_cell_width as u16));
-					zoom.cell_pan_from_top = zoom
-						.cell_pan_from_top
-						.min(cell_h.saturating_sub(new_cell_height as u16));
+			let unused_width = img_area.width - total_width;
+			self.last_render.unused_width = unused_width;
+			img_area.x += unused_width / 2;
 
-					return KittyDisplay::DisplayImages(vec![KittyReadyToDisplay {
-						img,
-						page_num: self.page,
-						pos: Position {
-							x: img_area.x,
-							y: img_area.y
-						},
-						display_loc: DisplayLocation {
-							x: u32::from(zoom.cell_pan_from_left) * u32::from(font_size.0),
-							y: u32::from(zoom.cell_pan_from_top) * u32::from(font_size.1),
-							width,
-							height,
-							columns: img_area.width,
-							rows: img_area.height,
-							..DisplayLocation::default()
-						}
-					}]);
+			if let Some(total_height) = page_sizes.iter().map(|(_, h, _)| h).max() {
+				// This subtraction might sporadicly fail while shrinking the window.
+				if let Some(unused_height) = img_area.height.checked_sub(*total_height) {
+					img_area.y += unused_height / 2;
 				}
 			}
 
-			// here we calculate how many pages can fit in the available area.
-			let mut test_area_w = img_area.width;
-			// go through our pages, starting at the first one we want to view
-			let mut page_sizes = self.rendered[self.page..]
-				.iter_mut()
-				// and get this to represent a count of how many we're looking at so far to render
+			let to_display = page_sizes
+				.into_iter()
 				.enumerate()
-				// and only take as many as are ready to be rendered
-				.take_while(|(idx, page)| {
-					let mut take = page.img.is_some();
-					if let Some(max) = self.page_constraints.max_wide {
-						take &= *idx < max.get();
-					}
-					take
-				})
-				// and map it to their width (in cells on the terminal, not pixels)
-				.filter_map(|(_, page)| {
-					page.img.as_mut().map(|img| {
-						let (w, h) = img.w_h();
-						(w, h, img)
+				.filter_map(|(idx, (width, _, img))| {
+					let maybe_img =
+						Self::render_single_page(frame, img, Rect { width, ..img_area });
+					img_area.x += width;
+					maybe_img.map(|(img, pos)| KittyReadyToDisplay {
+						img,
+						page_num: idx + self.page,
+						pos,
+						display_loc: DisplayLocation::default()
 					})
-				})
-				// and then take them as long as they won't overflow the available area.
-				.take_while(|(width, _, _)| match test_area_w.checked_sub(*width) {
-					Some(new_val) => {
-						test_area_w = new_val;
-						true
-					}
-					None => false
 				})
 				.collect::<Vec<_>>();
 
-			if self.page_constraints.r_to_l {
-				page_sizes.reverse();
-			}
+			// we want to set this at the very end so it doesn't get set somewhere halfway through and
+			// then the whole diffing thing messes it up
+			self.last_render.rect = size;
 
-			if page_sizes.is_empty() {
-				// If none are ready to render, just show the loading thing
-				Self::render_loading_in(frame, img_area);
-				KittyDisplay::ClearImages
-			} else {
-				execute!(stdout(), BeginSynchronizedUpdate).unwrap();
-
-				let total_width = page_sizes.iter().map(|(w, _, _)| w).sum::<u16>();
-
-				self.last_render.pages_shown = page_sizes.len();
-
-				let unused_width = img_area.width - total_width;
-				self.last_render.unused_width = unused_width;
-				img_area.x += unused_width / 2;
-
-				if let Some(total_height) = page_sizes.iter().map(|(_, h, _)| h).max() {
-					// This subtraction might sporadicly fail while shrinking the window.
-					if let Some(unused_height) = img_area.height.checked_sub(*total_height) {
-						img_area.y += unused_height / 2;
-					}
-				}
-
-				let to_display = page_sizes
-					.into_iter()
-					.enumerate()
-					.filter_map(|(idx, (width, _, img))| {
-						let maybe_img =
-							Self::render_single_page(frame, img, Rect { width, ..img_area });
-						img_area.x += width;
-						maybe_img.map(|(img, pos)| KittyReadyToDisplay {
-							img,
-							page_num: idx + self.page,
-							pos,
-							display_loc: DisplayLocation::default()
-						})
-					})
-					.collect::<Vec<_>>();
-
-				// we want to set this at the very end so it doesn't get set somewhere halfway through and
-				// then the whole diffing thing messes it up
-				self.last_render.rect = size;
-
-				KittyDisplay::DisplayImages(to_display)
-			}
+			KittyDisplay::DisplayImages(to_display)
 		}
 	}
 

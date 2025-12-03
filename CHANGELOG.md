@@ -1,5 +1,7 @@
 # Unreleased
 
+# v0.5.0
+
 - Switched simd base64 crate for one that works on stable (from `vb64` to `base64_simd`)
 - Allow boolean arguments to function as flags, without a `true` or `false` argument following the flag itself ([#109](https://github.com/itsjunetime/tdf/pull/109), thanks [@tatounee](https://github.com/tatounee)!)
 - Fix cropping issues when zooming out too much while using kitty protocol

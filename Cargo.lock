@@ -1606,7 +1606,8 @@ dependencies = [
 [[package]]
 name = "kittage"
 version = "0.1.1"
-source = "git+https://github.com/itsjunetime/kittage.git#fbd2a7d42296771e044575c009ee34616a3964e5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be6b61789e2841119b210569d4acd950d47dae805f8d3235190d28cb40677632"
 dependencies = [
  "base64-simd",
  "crossterm",
@@ -3019,7 +3020,7 @@ checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
 name = "tdf-viewer"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "console-subscriber",
  "cpuprofiler",

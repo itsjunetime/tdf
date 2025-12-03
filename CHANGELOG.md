@@ -1,15 +1,16 @@
 # Unreleased
 
 - Switched simd base64 crate for one that works on stable (from `vb64` to `base64_simd`)
-- Allow boolean arguments to function as flags, without a `true` or `false` argument following the flag itself (thanks [@tatounee](https://github.com/tatounee)!)
+- Allow boolean arguments to function as flags, without a `true` or `false` argument following the flag itself ([#109](https://github.com/itsjunetime/tdf/pull/109), thanks [@tatounee](https://github.com/tatounee)!)
 - Fix cropping issues when zooming out too much while using kitty protocol
 - Added `gg` and `G` keybindings for scrolling to the top and bottom of a page, respectively, when filling the width of the screen with kitty
 - Updated help page to only show kitty keybindings when you're actually using kitty
-- Map page-up and page-down keybindings to do the same thing as up-key and down-key (thanks [@maxdexh](https://github.com/maxdexh)!)
-- Vertically center pages within the available space if they are not constrained by the height (thanks [@maxdexh](https://github.com/maxdexh)!)
-- Fixed issue with cooked mode not being restored upon panic/error (thanks [@maxdexh](https://github.com/maxdexh)!)
-- Implemented a debounce for file reload updates to prevent some editors from paralyzing the app due to a flurry of reloads (thanks [@maxdexh](https://github.com/maxdexh))
-- Fixed an overflow when zooming out of horizontal pdfs (thanks [@maxdexh](https://github.com/maxdexh)!)
+- Map page-up and page-down keybindings to do the same thing as up-key and down-key ([#115](https://github.com/itsjunetime/tdf/pull/115), thanks [@maxdexh](https://github.com/maxdexh)!)
+- Vertically center pages within the available space if they are not constrained by the height ([#116](https://github.com/itsjunetime/tdf/pull/116), thanks [@maxdexh](https://github.com/maxdexh)!)
+- Fixed issue with cooked mode not being restored upon panic/error ([#118](https://github.com/itsjunetime/tdf/pull/118), thanks [@maxdexh](https://github.com/maxdexh)!)
+- Implemented a debounce for file reload updates to prevent some editors from paralyzing the app due to a flurry of reloads ([#117](https://github.com/itsjunetime/tdf/pull/117), thanks [@maxdexh](https://github.com/maxdexh))
+- Fixed an overflow when zooming out of horizontal pdfs ([#119](https://github.com/itsjunetime/tdf/pull/119), thanks [@maxdexh](https://github.com/maxdexh)!)
+- Reworked zooming to allow for full zooming in and out and panning in both directions ([#121](https://github.com/itsjunetime/tdf/pull/121), thanks [@maxdexh](https://github.com/maxdexh)!)
 
 # v0.4.3
 

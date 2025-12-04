@@ -102,6 +102,64 @@ impl Zoom {
 			ZOOM_RATE_GRANULAR.powi(self.level.into())
 		}
 	}
+
+	fn step_in(&mut self) {
+		self.level = self.level.saturating_add(1);
+	}
+	fn step_out(&mut self) {
+		self.level = self.level.saturating_sub(1);
+	}
+
+	// TODO: Make this configurable, maybe allow fractional steps?
+	// With fractional steps, it might also be a good idea to have these
+	// have the same ratio as the font aspect ratio.
+	const PAN_STEP_X: i16 = 2;
+	const PAN_STEP_Y: i16 = 1;
+
+	fn pan(&mut self, direction: Direction) {
+		let (target, sign) = match direction {
+			Direction::Up => (&mut self.cell_pan_from_top, -1),
+			Direction::Down => (&mut self.cell_pan_from_top, 1),
+			Direction::Left => (&mut self.cell_pan_from_left, -1),
+			Direction::Right => (&mut self.cell_pan_from_left, 1)
+		};
+		let step = if direction.is_vertical() {
+			Self::PAN_STEP_Y
+		} else {
+			Self::PAN_STEP_X
+		};
+		*target = target.saturating_add_signed(sign * step);
+	}
+	fn pan_bottom(&mut self) {
+		self.cell_pan_from_top = 0;
+	}
+	fn pan_top(&mut self) {
+		self.cell_pan_from_top = u16::MAX;
+	}
+}
+#[derive(Clone, Copy, Debug)]
+enum Direction {
+	Up,
+	Down,
+	Left,
+	Right
+}
+impl Direction {
+	/// Flips the directions for vertical and horizonal panning.
+	fn flip_mouse_xy(self) -> Self {
+		match self {
+			Self::Up => Self::Left,
+			Self::Left => Self::Up,
+			Self::Down => Self::Right,
+			Self::Right => Self::Down
+		}
+	}
+	fn is_vertical(self) -> bool {
+		match self {
+			Self::Up | Self::Down => true,
+			Self::Left | Self::Right => false
+		}
+	}
 }
 
 // This seems like a kinda weird struct because it holds two optionals but any representation
@@ -637,6 +695,8 @@ impl Tui {
 			InputAction::JumpingToPage(new_page)
 		}
 
+		let can_zoom = self.is_kitty && self.zoom.is_some();
+
 		match ev {
 			Event::Key(key) => {
 				match key.code {
@@ -653,7 +713,7 @@ impl Tui {
 							self.bottom_msg
 						{
 							if c == 'g' && self.is_kitty {
-								self.update_zoom(|z| z.cell_pan_from_top = 0);
+								self.update_zoom(Zoom::pan_bottom);
 								self.set_msg(MessageSetting::Pop);
 								return Some(InputAction::Redraw);
 							}
@@ -762,24 +822,13 @@ impl Tui {
 								self.last_render.rect = Rect::default();
 								Some(InputAction::SwitchRenderZoom(f_or_f))
 							}
-							'o' if self.is_kitty =>
-								self.update_zoom(|z| z.level = z.level.saturating_add(1)),
-							'O' if self.is_kitty =>
-								self.update_zoom(|z| z.level = z.level.saturating_sub(1)),
-							'L' if self.is_kitty => self.update_zoom(|z| {
-								z.cell_pan_from_left = z.cell_pan_from_left.saturating_add(1);
-							}),
-							'H' if self.is_kitty => self.update_zoom(|z| {
-								z.cell_pan_from_left = z.cell_pan_from_left.saturating_sub(1);
-							}),
-							'J' if self.is_kitty => self.update_zoom(|z| {
-								z.cell_pan_from_top = z.cell_pan_from_top.saturating_add(1);
-							}),
-							'K' if self.is_kitty => self.update_zoom(|z| {
-								z.cell_pan_from_top = z.cell_pan_from_top.saturating_sub(1);
-							}),
-							'G' if self.is_kitty =>
-								self.update_zoom(|z| z.cell_pan_from_top = u16::MAX),
+							'o' if can_zoom => self.update_zoom(Zoom::step_in),
+							'O' if can_zoom => self.update_zoom(Zoom::step_out),
+							'L' if can_zoom => self.update_zoom(|z| z.pan(Direction::Right)),
+							'H' if can_zoom => self.update_zoom(|z| z.pan(Direction::Left)),
+							'J' if can_zoom => self.update_zoom(|z| z.pan(Direction::Down)),
+							'K' if can_zoom => self.update_zoom(|z| z.pan(Direction::Up)),
+							'G' if can_zoom => self.update_zoom(Zoom::pan_top),
 							_ => None
 						}
 					}
@@ -866,29 +915,36 @@ impl Tui {
 				}
 			}
 			Event::Mouse(mouse) => {
-				if mouse.modifiers.contains(KeyModifiers::CONTROL)
-					&& self.is_kitty
-					&& self.zoom.is_some()
-				{
-					match mouse.kind {
-						MouseEventKind::ScrollUp =>
-							self.update_zoom(|z| z.level = z.level.saturating_add(1).min(0)),
-						MouseEventKind::ScrollDown =>
-							self.update_zoom(|z| z.level = z.level.saturating_sub(1)),
-						_ => None
+				let mut handle_scroll = |mut direction: Direction| {
+					if can_zoom {
+						if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+							match direction {
+								Direction::Up => self.update_zoom(Zoom::step_in),
+								Direction::Down => self.update_zoom(Zoom::step_out),
+								_ => None
+							}
+						} else {
+							if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+								direction = direction.flip_mouse_xy();
+							}
+							self.update_zoom(|z| z.pan(direction))
+						}
+					} else {
+						let (change, amount) = match direction {
+							Direction::Right => (PageChange::Next, ChangeAmount::Single),
+							Direction::Down => (PageChange::Next, ChangeAmount::WholeScreen),
+							Direction::Left => (PageChange::Prev, ChangeAmount::Single),
+							Direction::Up => (PageChange::Prev, ChangeAmount::WholeScreen)
+						};
+						self.change_page(change, amount)
 					}
-				} else {
-					match mouse.kind {
-						MouseEventKind::ScrollRight =>
-							self.change_page(PageChange::Next, ChangeAmount::Single),
-						MouseEventKind::ScrollDown =>
-							self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
-						MouseEventKind::ScrollLeft =>
-							self.change_page(PageChange::Prev, ChangeAmount::Single),
-						MouseEventKind::ScrollUp =>
-							self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-						_ => None
-					}
+				};
+				match mouse.kind {
+					MouseEventKind::ScrollRight => handle_scroll(Direction::Right),
+					MouseEventKind::ScrollDown => handle_scroll(Direction::Down),
+					MouseEventKind::ScrollLeft => handle_scroll(Direction::Left),
+					MouseEventKind::ScrollUp => handle_scroll(Direction::Up),
+					_ => None
 				}
 			}
 			Event::Resize(_, _) => Some(InputAction::Redraw),

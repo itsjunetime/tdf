@@ -39,7 +39,7 @@ use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
-	renderer::{self, RenderError, RenderInfo, RenderNotif},
+	renderer::{self, MUPDF_BLACK, MUPDF_WHITE, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
 
@@ -128,21 +128,37 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		.canonicalize()
 		.map_err(|e| WrappedErr(format!("Cannot canonicalize provided file: {e}").into()))?;
 
-	let black =
-		parse_color_to_i32(flags.black_color.as_deref().unwrap_or("000000")).map_err(|e| {
-			WrappedErr(
-				format!("Couldn't parse black color: {e} - is it formatted like a CSS color?")
+	let black = flags
+		.black_color
+		.as_deref()
+		.map(|color| {
+			parse_color_to_i32(color).map_err(|e| {
+				WrappedErr(
+					format!(
+						"Couldn't parse black color {color:?}: {e} - is it formatted like a CSS color?"
+					)
 					.into()
-			)
-		})?;
+				)
+			})
+		})
+		.transpose()?
+		.unwrap_or(MUPDF_BLACK);
 
-	let white =
-		parse_color_to_i32(flags.white_color.as_deref().unwrap_or("FFFFFF")).map_err(|e| {
-			WrappedErr(
-				format!("Couldn't parse white color: {e} - is it formatted like a CSS color?")
+	let white = flags
+		.white_color
+		.as_deref()
+		.map(|color| {
+			parse_color_to_i32(color).map_err(|e| {
+				WrappedErr(
+					format!(
+						"Couldn't parse white color {color:?}: {e} - is it formatted like a CSS color?"
+					)
 					.into()
-			)
-		})?;
+				)
+			})
+		})
+		.transpose()?
+		.unwrap_or(MUPDF_WHITE);
 
 	// need to keep it around throughout the lifetime of the program, but don't rly need to use it.
 	// Just need to make sure it doesn't get dropped yet.

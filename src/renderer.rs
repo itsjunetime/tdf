@@ -57,8 +57,8 @@ struct PrevRender {
 	num_search_found: Option<usize>
 }
 
-const MUPDF_BLACK: i32 = 0;
-const MUPDF_WHITE: i32 = i32::from_be_bytes([0, 0xff, 0xff, 0xff]);
+pub const MUPDF_BLACK: i32 = 0;
+pub const MUPDF_WHITE: i32 = i32::from_be_bytes([0, 0xff, 0xff, 0xff]);
 
 #[inline]
 pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
@@ -152,8 +152,8 @@ pub fn start_rendering(
 
 		sender.send(Ok(RenderInfo::NumPages(n_pages.get())))?;
 
-		// We're using this vec of bools to indicate which page numbers have already been rendered,
-		// to support people jumping to specific pages and having quick rendering results. We
+		// We're using this vec to indicate which page numbers have already been rendered, to
+		// support people jumping to specific pages and having quick rendering results. We
 		// `split_at_mut` at 0 initially (which bascially makes `right == rendered && left == []`),
 		// doing basically nothing, but if we get a notification that something has been jumped to,
 		// then we can split at that page and render at both sides of it
@@ -277,7 +277,7 @@ pub fn start_rendering(
 				// we only want to continue if one of the following is met:
 				// 1. It failed to render last time (we want to retry)
 				// 2. The `contained_term` is set to Unknown, meaning that we need to at least
-				//	  check if it contains the current term to see if it needs a re-render
+				//    check if it contains the current term to see if it needs a re-render
 				if rendered.successful && rendered.num_search_found.is_some() {
 					continue;
 				}
@@ -569,5 +569,16 @@ impl Iterator for PopOnNext<'_> {
 	type Item = usize;
 	fn next(&mut self) -> Option<Self::Item> {
 		self.inner.pop_front()
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		let l = self.len();
+		(l, Some(l))
+	}
+}
+
+impl ExactSizeIterator for PopOnNext<'_> {
+	fn len(&self) -> usize {
+		self.inner.len()
 	}
 }

@@ -131,28 +131,32 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let black = flags
 		.black_color
 		.as_deref()
-		.map(|color| parse_color_to_i32(color)
-			.map_err(|e| {
+		.map(|color| {
+			parse_color_to_i32(color).map_err(|e| {
 				WrappedErr(
-					format!("Couldn't parse black color {color:?}: {e} - is it formatted like a CSS color?")
-						.into()
+					format!(
+						"Couldn't parse black color {color:?}: {e} - is it formatted like a CSS color?"
+					)
+					.into()
 				)
 			})
-		)
+		})
 		.transpose()?
 		.unwrap_or(MUPDF_BLACK);
 
 	let white = flags
 		.white_color
 		.as_deref()
-		.map(|color| parse_color_to_i32(color)
-			.map_err(|e| {
+		.map(|color| {
+			parse_color_to_i32(color).map_err(|e| {
 				WrappedErr(
-					format!("Couldn't parse white color {color:?}: {e} - is it formatted like a CSS color?")
-						.into()
+					format!(
+						"Couldn't parse white color {color:?}: {e} - is it formatted like a CSS color?"
+					)
+					.into()
 				)
 			})
-		)
+		})
 		.transpose()?
 		.unwrap_or(MUPDF_WHITE);
 

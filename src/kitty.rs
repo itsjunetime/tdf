@@ -141,7 +141,7 @@ pub async fn display_kitty_images<'es>(
 	};
 
 	let new_pages = images.iter().map(|img| img.page_num).collect::<HashSet<_>>();
-	for (page_num, image_id) in state.displayed.iter() {
+	for (page_num, image_id) in &state.displayed {
 		if !new_pages.contains(page_num) {
 			run_action(
 				Action::Delete(DeleteConfig {

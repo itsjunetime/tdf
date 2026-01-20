@@ -604,7 +604,6 @@ fn compute_render_geometry(
 	})
 }
 
-#[expect(clippy::too_many_arguments)]
 fn render_page_to_image_data(
 	page: &Page,
 	geometry: &RenderGeometry,

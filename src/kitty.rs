@@ -1,4 +1,8 @@
-use std::{io::Write, num::NonZeroU32};
+use std::{
+	collections::{HashMap, HashSet},
+	io::Write,
+	num::NonZeroU32
+};
 
 use crossterm::{
 	cursor::MoveTo,
@@ -31,6 +35,18 @@ pub enum KittyDisplay<'tui> {
 	NoChange,
 	ClearImages,
 	DisplayImages(Vec<KittyReadyToDisplay<'tui>>)
+}
+
+#[derive(Default)]
+pub struct KittyState {
+	displayed: HashMap<usize, ImageId>
+}
+
+impl KittyState {
+	#[must_use]
+	pub fn new() -> Self {
+		Self::default()
+	}
 }
 
 pub struct DbgWriter<W: Write> {
@@ -96,6 +112,7 @@ pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
 
 pub async fn display_kitty_images<'es>(
 	display: KittyDisplay<'_>,
+	state: &mut KittyState,
 	ev_stream: &'es mut EventStream
 ) -> Result<
 	(),
@@ -107,7 +124,7 @@ pub async fn display_kitty_images<'es>(
 > {
 	let images = match display {
 		KittyDisplay::NoChange => return Ok(()),
-		KittyDisplay::DisplayImages(_) | KittyDisplay::ClearImages => {
+		KittyDisplay::ClearImages => {
 			run_action(
 				Action::Delete(DeleteConfig {
 					effect: ClearOrDelete::Clear,
@@ -117,16 +134,29 @@ pub async fn display_kitty_images<'es>(
 			)
 			.await
 			.map_err(|e| (vec![], "Couldn't clear previous images", e))?;
-
-			let KittyDisplay::DisplayImages(images) = display else {
-				return Ok(());
-			};
-
-			images
+			state.displayed.clear();
+			return Ok(());
 		}
+		KittyDisplay::DisplayImages(images) => images
 	};
 
+	let new_pages = images.iter().map(|img| img.page_num).collect::<HashSet<_>>();
+	for (page_num, image_id) in state.displayed.iter() {
+		if !new_pages.contains(page_num) {
+			run_action(
+				Action::Delete(DeleteConfig {
+					effect: ClearOrDelete::Clear,
+					which: WhichToDelete::ImageId(*image_id, None)
+				}),
+				ev_stream
+			)
+			.await
+			.map_err(|e| (vec![], "Couldn't clear previous images", e))?;
+		}
+	}
+
 	let mut err = None;
+	let mut new_displayed = HashMap::new();
 	for KittyReadyToDisplay {
 		img,
 		page_num,
@@ -176,7 +206,7 @@ pub async fn display_kitty_images<'es>(
 				match res {
 					Ok(img_id) => {
 						*img = MaybeTransferred::Transferred(img_id);
-						Ok(())
+						Ok(img_id)
 					}
 					Err(e) => Err((page_num, e))
 				}
@@ -190,17 +220,24 @@ pub async fn display_kitty_images<'es>(
 				ev_stream
 			)
 			.await
-			.map(|_| ())
+			.map(|_| *image_id)
 			.map_err(|e| (page_num, e))
 		};
 
 		log::debug!("this_err is {this_err:#?}");
 
-		if let Err((id, e)) = this_err {
-			let e = err.get_or_insert_with(|| (vec![], e));
-			e.0.push(id);
+		match this_err {
+			Ok(image_id) => {
+				new_displayed.insert(page_num, image_id);
+			}
+			Err((id, e)) => {
+				let e = err.get_or_insert_with(|| (vec![], e));
+				e.0.push(id);
+			}
 		}
 	}
+
+	state.displayed = new_displayed;
 
 	match err {
 		Some((replace, e)) => Err((replace, "Couldn't transfer image to the terminal", e)),

@@ -39,6 +39,7 @@ use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
+	kitty::KittyState,
 	renderer::{self, MUPDF_BLACK, MUPDF_WHITE, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
@@ -88,6 +89,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	console_subscriber::init();
 
 	const DEFAULT_DEBOUNCE_DELAY: Duration = Duration::from_millis(50);
+	const DEFAULT_CONVERTER_PRERENDER: usize = 20;
 
 	let flags = xflags::parse_or_exit! {
 		/// Display the pdf with the pages starting at the right hand size and moving left and
@@ -123,6 +125,12 @@ async fn inner_main() -> Result<(), WrappedErr> {
 			"Please specify the file to open, e.g. `tdf ./my_example_pdf.pdf`".into()
 		));
 	};
+
+	if file.is_dir() {
+		return Err(WrappedErr(
+			"Please specify the file to open, e.g. `tdf ./my_example_pdf.pdf`".into()
+		));
+	}
 
 	let path = file
 		.canonicalize()
@@ -265,6 +273,10 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		.prerender
 		.and_then(NonZeroUsize::new)
 		.map_or(PrerenderLimit::All, PrerenderLimit::Limited);
+	let converter_prerender = flags
+		.prerender
+		.and_then(NonZeroUsize::new)
+		.map_or(DEFAULT_CONVERTER_PRERENDER, NonZeroUsize::get);
 
 	std::thread::spawn(move || {
 		renderer::start_rendering(
@@ -287,11 +299,12 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let (to_main, from_converter) = flume::unbounded();
 
 	let is_kitty = picker.protocol_type() == ProtocolType::Kitty;
+	let kitty_state = KittyState::new();
 
 	let shms_work = is_kitty && do_shms_work(&mut ev_stream).await;
 
 	tokio::spawn(run_conversion_loop(
-		to_main, from_main, picker, 20, shms_work
+		to_main, from_main, picker, converter_prerender, shms_work
 	));
 
 	let file_name = path.file_name().map_or_else(
@@ -347,6 +360,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		from_converter,
 		fullscreen,
 		tui,
+		kitty_state,
 		&mut term,
 		main_area,
 		font_size
@@ -375,6 +389,7 @@ async fn enter_redraw_loop(
 	mut from_converter: RecvStream<'_, Result<ConvertedPage, RenderError>>,
 	mut fullscreen: bool,
 	mut tui: Tui,
+	mut kitty_state: KittyState,
 	term: &mut Terminal<CrosstermBackend<Stdout>>,
 	mut main_area: tdf::tui::RenderLayout,
 	font_size: FontSize
@@ -450,7 +465,7 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area, font_size);
 			})?;
 
-			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
+			let maybe_err = display_kitty_images(to_display, &mut kitty_state, &mut ev_stream).await;
 
 			if let Err((to_replace, err_desc, enum_err)) = maybe_err {
 				match enum_err {

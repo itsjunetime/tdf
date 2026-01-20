@@ -5,7 +5,7 @@ use std::{
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt as _;
-use image::DynamicImage;
+use image::{DynamicImage, RgbImage, RgbaImage};
 use kittage::{NumberOrId, action::NONZERO_ONE};
 use ratatui::layout::Rect;
 use ratatui_image::{
@@ -90,7 +90,7 @@ pub async fn run_conversion_loop(
 		}
 
 		// This kinda mimics the way the renderer alternates between going above and below the
-		// current page (within the bounds of how many pages there are) until we've done 20
+		// current page (within the bounds of how many pages there are) until we've done `prerender`
 		let idx_start = page.saturating_sub(prerender / 2);
 		let idx_end = idx_start.saturating_add(prerender).min(images.len());
 
@@ -111,14 +111,43 @@ pub async fn run_conversion_loop(
 			return Ok(None);
 		};
 
-		let mut dyn_img = image::load_from_memory_with_format(
-			&page_info.img_data.pixels,
-			image::ImageFormat::Pnm
-		)
-		.map_err(|e| RenderError::Converting(format!("Can't load image: {e}")))?;
+		let pixels = page_info.img_data.pixels.as_ref().to_vec();
+		let mut dyn_img = match page_info.img_data.components {
+			3 => RgbImage::from_raw(
+				page_info.img_data.width,
+				page_info.img_data.height,
+				pixels
+			)
+			.map(DynamicImage::ImageRgb8)
+			.ok_or_else(|| {
+				RenderError::Converting("Couldn't build RGB image from rendered bytes".into())
+			})?,
+			4 => RgbaImage::from_raw(
+				page_info.img_data.width,
+				page_info.img_data.height,
+				pixels
+			)
+			.map(DynamicImage::ImageRgba8)
+			.ok_or_else(|| {
+				RenderError::Converting("Couldn't build RGBA image from rendered bytes".into())
+			})?,
+			other => {
+				return Err(RenderError::Converting(format!(
+					"Unsupported pixel format with {other} components"
+				)));
+			}
+		};
 
 		match dyn_img {
 			DynamicImage::ImageRgb8(ref mut img) =>
+				for quad in &*page_info.result_rects {
+					img.par_enumerate_pixels_mut()
+						.filter(|(x, y, _)| {
+							*x > quad.ul_x && *x < quad.lr_x && *y > quad.ul_y && *y < quad.lr_y
+						})
+						.for_each(|(_, _, px)| px.0[2] = px.0[2].saturating_sub(u8::MAX / 2));
+				},
+			DynamicImage::ImageRgba8(ref mut img) =>
 				for quad in &*page_info.result_rects {
 					img.par_enumerate_pixels_mut()
 						.filter(|(x, y, _)| {

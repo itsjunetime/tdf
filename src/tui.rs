@@ -1066,7 +1066,7 @@ impl Tui {
 }
 
 static HELP_PAGE: &str = "\
-l, h, left, right:
+h, l, left, right:
     Go forward/backwards a single page
 j, k, down, up:
     Go forwards/backwards a screen's worth of pages

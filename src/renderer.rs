@@ -1,9 +1,13 @@
-use std::{collections::VecDeque, num::NonZeroUsize, thread::sleep, time::Duration};
+use std::{
+	collections::{HashMap, VecDeque},
+	num::NonZeroUsize,
+	sync::Arc,
+	thread::sleep,
+	time::Duration
+};
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
-use mupdf::{
-	Colorspace, Document, Matrix, Page, Pixmap, Quad, TextPageFlags, text_page::SearchHitResponse
-};
+use mupdf::{Colorspace, Document, Matrix, Page, Quad, TextPageFlags, text_page::SearchHitResponse};
 use ratatui::layout::Rect;
 
 use crate::{
@@ -11,6 +15,89 @@ use crate::{
 };
 
 const KITTY_MAX_W_OR_H: f32 = 10_000.0;
+const RENDER_CACHE_LIMIT_BYTES: usize = 128 * 1024 * 1024;
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct RenderCacheKey {
+	page_num: usize,
+	area_w_px: u32,
+	area_h_px: u32,
+	fit_or_fill: FitOrFill,
+	invert: bool,
+	black: i32,
+	white: i32
+}
+
+struct RenderCacheEntry {
+	img: ImageData,
+	bytes: usize
+}
+
+struct RenderCache {
+	limit_bytes: usize,
+	used_bytes: usize,
+	map: HashMap<RenderCacheKey, RenderCacheEntry>,
+	order: VecDeque<RenderCacheKey>
+}
+
+impl RenderCache {
+	fn new(limit_bytes: usize) -> Self {
+		Self {
+			limit_bytes,
+			used_bytes: 0,
+			map: HashMap::new(),
+			order: VecDeque::new()
+		}
+	}
+
+	fn clear(&mut self) {
+		self.map.clear();
+		self.order.clear();
+		self.used_bytes = 0;
+	}
+
+	fn get(&mut self, key: &RenderCacheKey) -> Option<ImageData> {
+		let img = match self.map.get(key) {
+			Some(entry) => entry.img.clone(),
+			None => return None
+		};
+		self.touch(key);
+		Some(img)
+	}
+
+	fn insert(&mut self, key: RenderCacheKey, img: ImageData) {
+		let bytes = img.pixels.len();
+		if let Some(existing) = self.map.remove(&key) {
+			self.used_bytes = self.used_bytes.saturating_sub(existing.bytes);
+			if let Some(pos) = self.order.iter().position(|k| k == &key) {
+				self.order.remove(pos);
+			}
+		}
+
+		self.used_bytes = self.used_bytes.saturating_add(bytes);
+		self.order.push_back(key.clone());
+		self.map.insert(key, RenderCacheEntry { img, bytes });
+		self.evict_if_needed();
+	}
+
+	fn touch(&mut self, key: &RenderCacheKey) {
+		if let Some(pos) = self.order.iter().position(|k| k == key) {
+			self.order.remove(pos);
+		}
+		self.order.push_back(key.clone());
+	}
+
+	fn evict_if_needed(&mut self) {
+		while self.used_bytes > self.limit_bytes {
+			let Some(key) = self.order.pop_front() else {
+				break;
+			};
+			if let Some(entry) = self.map.remove(&key) {
+				self.used_bytes = self.used_bytes.saturating_sub(entry.bytes);
+			}
+		}
+	}
+}
 
 #[derive(Debug)]
 pub enum RenderNotif {
@@ -46,7 +133,10 @@ pub struct PageInfo {
 
 #[derive(Clone)]
 pub struct ImageData {
-	pub pixels: Vec<u8>,
+	pub pixels: Arc<[u8]>,
+	pub width: u32,
+	pub height: u32,
+	pub components: u8,
 	pub cell_w: u16,
 	pub cell_h: u16
 }
@@ -102,6 +192,7 @@ pub fn start_rendering(
 	let mut fit_or_fill = FitOrFill::Fit;
 
 	let mut need_rerender = VecDeque::new();
+	let mut render_cache = RenderCache::new(RENDER_CACHE_LIMIT_BYTES);
 
 	'reload: loop {
 		let doc = match Document::open(path) {
@@ -129,6 +220,7 @@ pub fn start_rendering(
 			Ok(d) => {
 				if stored_doc.is_some() {
 					sender.send(Ok(RenderInfo::Reloaded))?;
+					render_cache.clear();
 				}
 				&*stored_doc.insert(d)
 			}
@@ -178,8 +270,10 @@ pub fn start_rendering(
 				new_area
 			});
 
-			let area_w = f32::from(area.width) * f32::from(col_w);
-			let area_h = f32::from(area.height) * f32::from(col_h);
+			let area_w_px = u32::from(area.width) * u32::from(col_w);
+			let area_h_px = u32::from(area.height) * u32::from(col_h);
+			let area_w = area_w_px as f32;
+			let area_h = area_h_px as f32;
 
 			// what we do with a notif is the same regardless of if we're in the middle of
 			// rendering the list of pages or we're all done
@@ -192,17 +286,20 @@ pub fn start_rendering(
 							for page in &mut rendered {
 								page.successful = false;
 							}
+							render_cache.clear();
 							continue 'render_pages;
 						}
 						RenderNotif::Area(new_area) => {
 							preserved_area = Some(new_area);
 							fill_default(&mut rendered, n_pages.get());
+							render_cache.clear();
 							continue 'render_pages;
 						}
 						RenderNotif::SwitchFitOrFill(f_or_f) =>
 							if f_or_f != fit_or_fill {
 								fit_or_fill = f_or_f;
 								fill_default(&mut rendered, n_pages.get());
+								render_cache.clear();
 								continue 'render_pages;
 							},
 						RenderNotif::JumpToPage(page) => {
@@ -293,46 +390,79 @@ pub fn start_rendering(
 				};
 
 				// render the page
-				match render_single_page_to_ctx(
-					&page,
-					search_term.as_deref(),
-					rendered,
-					invert,
-					black,
-					white,
-					fit_or_fill,
-					(area_w, area_h)
-				) {
-					// If that fn returned Some, that means it needed to be re-rendered for some
-					// reason or another, so we're sending it here
-					Ok(ctx) => {
-						let w = ctx.pixmap.width();
-						let h = ctx.pixmap.height();
-						let cap = (w * h * u32::from(ctx.pixmap.n())) as usize + 16;
-						let mut pixels = Vec::with_capacity(cap);
-						if let Err(e) = ctx.pixmap.write_to(&mut pixels, mupdf::ImageFormat::PNM) {
+				let geometry = match compute_render_geometry(&page, fit_or_fill, (area_w, area_h)) {
+					Ok(geometry) => geometry,
+					Err(e) => {
+						sender.send(Err(RenderError::Doc(e)))?;
+						continue;
+					}
+				};
+
+				let result_quads = match rendered.num_search_found {
+					None => match search_page(&page, search_term.as_deref(), 0) {
+						Ok(quads) => quads,
+						Err(e) => {
 							sender.send(Err(RenderError::Doc(e)))?;
 							continue;
 						}
-
-						log::debug!("got pixmap for page {page_num} with WxH {w}x{h}");
-
-						rendered.num_search_found = Some(ctx.result_rects.len());
-						rendered.successful = true;
-
-						sender.send(Ok(RenderInfo::Page(PageInfo {
-							img_data: ImageData {
-								pixels,
-								cell_w: (ctx.surface_w / f32::from(col_w)) as u16,
-								cell_h: (ctx.surface_h / f32::from(col_h)) as u16
-							},
-							page_num,
-							result_rects: ctx.result_rects
-						})))?;
+					},
+					Some(0) => Vec::new(),
+					Some(count @ 1..) => match search_page(&page, search_term.as_deref(), count) {
+						Ok(quads) => quads,
+						Err(e) => {
+							sender.send(Err(RenderError::Doc(e)))?;
+							continue;
+						}
 					}
-					// And if we got an error, then obviously we need to propagate that
-					Err(e) => sender.send(Err(RenderError::Doc(e)))?
-				}
+				};
+
+				let result_rects = quads_to_rects(result_quads, geometry.scale_factor);
+
+				let cache_key = RenderCacheKey {
+					page_num,
+					area_w_px,
+					area_h_px,
+					fit_or_fill,
+					invert,
+					black,
+					white
+				};
+
+				let img_data = if let Some(img_data) = render_cache.get(&cache_key) {
+					img_data
+				} else {
+					let img_data = match render_page_to_image_data(
+						&page,
+						&geometry,
+						invert,
+						black,
+						white,
+						col_w,
+						col_h
+					) {
+						Ok(img_data) => img_data,
+						Err(e) => {
+							sender.send(Err(RenderError::Doc(e)))?;
+							continue;
+						}
+					};
+					log::debug!(
+						"got pixmap for page {page_num} with WxH {}x{}",
+						img_data.width,
+						img_data.height
+					);
+					render_cache.insert(cache_key, img_data.clone());
+					img_data
+				};
+
+				rendered.num_search_found = Some(result_rects.len());
+				rendered.successful = true;
+
+				sender.send(Ok(RenderInfo::Page(PageInfo {
+					img_data,
+					page_num,
+					result_rects
+				})))?;
 
 				// check if we've been told to change the area that we're rendering to,
 				// or if we're told to rerender
@@ -439,31 +569,17 @@ pub fn start_rendering(
 	}
 }
 
-struct RenderedContext {
-	pixmap: Pixmap,
+struct RenderGeometry {
 	surface_w: f32,
 	surface_h: f32,
-	result_rects: Vec<HighlightRect>
+	scale_factor: f32
 }
 
-#[expect(clippy::too_many_arguments)]
-fn render_single_page_to_ctx(
+fn compute_render_geometry(
 	page: &Page,
-	search_term: Option<&str>,
-	prev_render: &PrevRender,
-	invert: bool,
-	black: i32,
-	white: i32,
 	fit_or_fill: FitOrFill,
 	(area_w, area_h): (f32, f32)
-) -> Result<RenderedContext, mupdf::error::Error> {
-	let result_rects = match prev_render.num_search_found {
-		None => search_page(page, search_term, 0)?,
-		Some(0) => Vec::new(),
-		Some(count @ 1..) => search_page(page, search_term, count)?
-	};
-
-	// then, get the size of the page
+) -> Result<RenderGeometry, mupdf::error::Error> {
 	let bounds = page.bounds()?;
 	let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
 
@@ -481,8 +597,25 @@ fn render_single_page_to_ctx(
 		scale_factor /= descale;
 	}
 
+	Ok(RenderGeometry {
+		surface_w,
+		surface_h,
+		scale_factor
+	})
+}
+
+#[expect(clippy::too_many_arguments)]
+fn render_page_to_image_data(
+	page: &Page,
+	geometry: &RenderGeometry,
+	invert: bool,
+	black: i32,
+	white: i32,
+	col_w: u16,
+	col_h: u16
+) -> Result<ImageData, mupdf::error::Error> {
 	let colorspace = Colorspace::device_rgb();
-	let matrix = Matrix::new_scale(scale_factor, scale_factor);
+	let matrix = Matrix::new_scale(geometry.scale_factor, geometry.scale_factor);
 
 	let mut pixmap = page.to_pixmap(&matrix, &colorspace, false, false)?;
 	if invert {
@@ -492,11 +625,27 @@ fn render_single_page_to_ctx(
 	}
 
 	let (x_res, y_res) = pixmap.resolution();
-	let new_x = (x_res as f32 * scale_factor) as i32;
-	let new_y = (y_res as f32 * scale_factor) as i32;
+	let new_x = (x_res as f32 * geometry.scale_factor) as i32;
+	let new_y = (y_res as f32 * geometry.scale_factor) as i32;
 	pixmap.set_resolution(new_x, new_y);
 
-	let result_rects = result_rects
+	let width = pixmap.width();
+	let height = pixmap.height();
+	let components = pixmap.n();
+	let pixels: Arc<[u8]> = Arc::from(pixmap.samples().to_vec());
+
+	Ok(ImageData {
+		pixels,
+		width,
+		height,
+		components,
+		cell_w: (geometry.surface_w / f32::from(col_w)) as u16,
+		cell_h: (geometry.surface_h / f32::from(col_h)) as u16
+	})
+}
+
+fn quads_to_rects(quads: Vec<Quad>, scale_factor: f32) -> Vec<HighlightRect> {
+	quads
 		.into_iter()
 		.map(|quad| {
 			let ul_x = (quad.ul.x * scale_factor) as u32;
@@ -510,14 +659,7 @@ fn render_single_page_to_ctx(
 				lr_y
 			}
 		})
-		.collect::<Vec<_>>();
-
-	Ok(RenderedContext {
-		pixmap,
-		surface_w,
-		surface_h,
-		result_rects
-	})
+		.collect::<Vec<_>>()
 }
 
 #[derive(Clone, Debug)]

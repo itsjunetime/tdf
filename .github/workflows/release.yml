@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-release:
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            os_name: linux
+            arch: x86_64
+          - runs-on: ubuntu-24.04-arm
+            os_name: linux
+            arch: arm64
+          - runs-on: macos-13
+            os_name: macos
+            arch: x86_64
+          - runs-on: macos-latest
+            os_name: macos
+            arch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libgoogle-perftools-dev google-perftools
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm fontconfig gperftools pkg-config
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+
+      - name: Detect packaging metadata
+        run: |
+          echo "ARCH=${{ matrix.arch }}" >> "$GITHUB_ENV"
+          echo "OS_NAME=${{ matrix.os_name }}" >> "$GITHUB_ENV"
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package release
+        run: |
+          mkdir -p release
+          cp target/release/tdf "release/tdf-${ARCH}-${OS_NAME}"
+          tar -czf "release/tdf-${ARCH}-${OS_NAME}.tar.gz" -C release "tdf-${ARCH}-${OS_NAME}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdf-${{ env.ARCH }}-${{ env.OS_NAME }}
+          path: release/tdf-${{ env.ARCH }}-${{ env.OS_NAME }}*
+
+  create-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tdf-*
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            tdf-*

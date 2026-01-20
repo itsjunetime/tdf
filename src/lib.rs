@@ -15,7 +15,7 @@ pub mod renderer;
 pub mod skip;
 pub mod tui;
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum FitOrFill {
 	Fit,
 	Fill

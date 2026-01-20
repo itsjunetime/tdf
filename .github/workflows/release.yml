@@ -18,7 +18,7 @@ jobs:
           - runs-on: ubuntu-24.04-arm
             os_name: linux
             arch: arm64
-          - runs-on: macos-13
+          - runs-on: macos-latest
             os_name: macos
             arch: x86_64
           - runs-on: macos-latest

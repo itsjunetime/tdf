@@ -113,24 +113,16 @@ pub async fn run_conversion_loop(
 
 		let pixels = page_info.img_data.pixels.as_ref().to_vec();
 		let mut dyn_img = match page_info.img_data.components {
-			3 => RgbImage::from_raw(
-				page_info.img_data.width,
-				page_info.img_data.height,
-				pixels
-			)
-			.map(DynamicImage::ImageRgb8)
-			.ok_or_else(|| {
-				RenderError::Converting("Couldn't build RGB image from rendered bytes".into())
-			})?,
-			4 => RgbaImage::from_raw(
-				page_info.img_data.width,
-				page_info.img_data.height,
-				pixels
-			)
-			.map(DynamicImage::ImageRgba8)
-			.ok_or_else(|| {
-				RenderError::Converting("Couldn't build RGBA image from rendered bytes".into())
-			})?,
+			3 => RgbImage::from_raw(page_info.img_data.width, page_info.img_data.height, pixels)
+				.map(DynamicImage::ImageRgb8)
+				.ok_or_else(|| {
+					RenderError::Converting("Couldn't build RGB image from rendered bytes".into())
+				})?,
+			4 => RgbaImage::from_raw(page_info.img_data.width, page_info.img_data.height, pixels)
+				.map(DynamicImage::ImageRgba8)
+				.ok_or_else(|| {
+					RenderError::Converting("Couldn't build RGBA image from rendered bytes".into())
+				})?,
 			other => {
 				return Err(RenderError::Converting(format!(
 					"Unsupported pixel format with {other} components"

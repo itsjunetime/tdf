@@ -38,8 +38,7 @@ use ratatui_image::{
 use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
-	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
-	kitty::KittyState,
+	kitty::{KittyDisplay, KittyState, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, MUPDF_BLACK, MUPDF_WHITE, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
@@ -304,7 +303,11 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let shms_work = is_kitty && do_shms_work(&mut ev_stream).await;
 
 	tokio::spawn(run_conversion_loop(
-		to_main, from_main, picker, converter_prerender, shms_work
+		to_main,
+		from_main,
+		picker,
+		converter_prerender,
+		shms_work
 	));
 
 	let file_name = path.file_name().map_or_else(
@@ -465,7 +468,8 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area, font_size);
 			})?;
 
-			let maybe_err = display_kitty_images(to_display, &mut kitty_state, &mut ev_stream).await;
+			let maybe_err =
+				display_kitty_images(to_display, &mut kitty_state, &mut ev_stream).await;
 
 			if let Err((to_replace, err_desc, enum_err)) = maybe_err {
 				match enum_err {

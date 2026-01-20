@@ -7,7 +7,9 @@ use std::{
 };
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
-use mupdf::{Colorspace, Document, Matrix, Page, Quad, TextPageFlags, text_page::SearchHitResponse};
+use mupdf::{
+	Colorspace, Document, Matrix, Page, Quad, TextPageFlags, text_page::SearchHitResponse
+};
 use ratatui::layout::Rect;
 
 use crate::{
@@ -432,13 +434,7 @@ pub fn start_rendering(
 					img_data
 				} else {
 					let img_data = match render_page_to_image_data(
-						&page,
-						&geometry,
-						invert,
-						black,
-						white,
-						col_w,
-						col_h
+						&page, &geometry, invert, black, white, col_w, col_h
 					) {
 						Ok(img_data) => img_data,
 						Err(e) => {

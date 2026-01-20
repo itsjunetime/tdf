@@ -140,7 +140,10 @@ pub async fn display_kitty_images<'es>(
 		KittyDisplay::DisplayImages(images) => images
 	};
 
-	let new_pages = images.iter().map(|img| img.page_num).collect::<HashSet<_>>();
+	let new_pages = images
+		.iter()
+		.map(|img| img.page_num)
+		.collect::<HashSet<_>>();
 	for (page_num, image_id) in &state.displayed {
 		if !new_pages.contains(page_num) {
 			run_action(

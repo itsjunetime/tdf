@@ -209,10 +209,6 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		)
 		.map_err(|e| WrappedErr(format!("Can't watch the provided file: {e}").into()))?;
 
-	// TODO: Handle non-utf8 file names? Maybe by constructing a CString and passing that in to the
-	// mupdf stuff instead of a rust string?
-	let file_path = path.clone().into_os_string().to_string_lossy().to_string();
-
 	let mut window_size = window_size().map_err(|e| {
 		WrappedErr(format!("Can't get your current terminal window size: {e}").into())
 	})?;
@@ -266,6 +262,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		.and_then(NonZeroUsize::new)
 		.map_or(PrerenderLimit::All, PrerenderLimit::Limited);
 
+	let file_path = path.clone();
 	std::thread::spawn(move || {
 		renderer::start_rendering(
 			&file_path,

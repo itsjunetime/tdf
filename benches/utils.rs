@@ -65,7 +65,6 @@ pub fn start_rendering_loop(
 	Sender<RenderNotif>
 ) {
 	let pathbuf = path.as_ref().canonicalize().unwrap();
-	let str_path = pathbuf.into_os_string().to_string_lossy().to_string();
 
 	let (to_render_tx, from_main_rx) = unbounded();
 	let (to_main_tx, from_render_rx) = unbounded();
@@ -91,7 +90,7 @@ pub fn start_rendering_loop(
 	let cell_width_px = size.width / size.columns;
 	std::thread::spawn(move || {
 		start_rendering(
-			&str_path,
+			&pathbuf,
 			to_main_tx,
 			from_main_rx,
 			cell_height_px,

@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, num::NonZeroUsize, thread::sleep, time::Duration};
+use std::{collections::VecDeque, num::NonZeroUsize, path::Path, thread::sleep, time::Duration};
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use mupdf::{
@@ -80,7 +80,7 @@ pub fn fill_default<T: Default>(vec: &mut Vec<T>, size: usize) {
 // probably be more performant if accessed by-value instead of through a reference. Probably.
 #[expect(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 pub fn start_rendering(
-	path: &str,
+	path: &Path,
 	sender: Sender<Result<RenderInfo, RenderError>>,
 	receiver: Receiver<RenderNotif>,
 	col_h: u16,

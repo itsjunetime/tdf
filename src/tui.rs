@@ -346,7 +346,6 @@ impl Tui {
 		}])
 	}
 
-	// TODO: Make a way to fill the width of the screen with one page and scroll down to view it
 	#[must_use]
 	pub fn render<'s>(
 		&'s mut self,

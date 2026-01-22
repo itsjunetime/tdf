@@ -1,2 +1,4 @@
 /target
 debug.log
+/.envrc
+/.direnv/

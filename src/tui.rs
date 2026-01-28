@@ -1105,6 +1105,8 @@ gg/G (when on fill-screen):
     Scroll to top/bottom of page
 H, J, K, L (when zoomed in):
     Pan direction around page
+0/$ (when on fill-screen):
+    Scroll to left/right side of page
 ";
 
 pub enum InputAction {

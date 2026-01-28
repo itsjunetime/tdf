@@ -1,5 +1,7 @@
 # Unreleased
 
+- Added keybindings (`0`/`$`) to scroll to left or right side of zoomed-in image ([#131](https://github.com/itsjunetime/tdf/pull/131), thank you [@IshDeshpa](https://github.com/IshDeshpa)!)
+
 # v0.5.0
 
 - Switched simd base64 crate for one that works on stable (from `vb64` to `base64_simd`)

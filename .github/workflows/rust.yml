@@ -15,7 +15,19 @@ env:
 
 jobs:
   test-build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { os: "macos-latest", target: "aarch64-apple-darwin" }
+          - { os: "ubuntu-latest", target: "x86_64-unknown-linux-gnu" }
+          - {
+              os: "windows-latest",
+              target: "x86_64-pc-windows-msvc",
+              ext: ".exe",
+            }
+          - { os: "ubuntu-24.04-arm", target: "aarch64-unknown-linux-gnu" }
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Setup sccache
@@ -38,7 +50,7 @@ jobs:
         with:
           packages: libfontconfig1-dev libgoogle-perftools-dev google-perftools
           version: latest # could be anything
-          
+
       - uses: actions/checkout@v4
       - name: Install clippy and fmt
         run: rustup component add clippy rustfmt
@@ -70,7 +82,7 @@ jobs:
         with:
           name: tdf-${{ matrix.target }}
           path: dist/tdf*
-       
+
   tag-release:
     name: Release on tag push
     runs-on: ubuntu-slim

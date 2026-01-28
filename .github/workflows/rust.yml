@@ -11,9 +11,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  tip_release_path: RELEASE.md
 
 jobs:
-  build:
+  test-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,10 +26,19 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
           echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev libgoogle-perftools-dev google-perftools
+
+      - name: Setup rust cache action
+        uses: swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: install build dependencies on ubuntu and cache
+        if: contains(matrix.os, 'ubuntu')
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libfontconfig1-dev libgoogle-perftools-dev google-perftools
+          version: latest # could be anything
+          
       - uses: actions/checkout@v4
       - name: Install clippy and fmt
         run: rustup component add clippy rustfmt
@@ -40,5 +50,82 @@ jobs:
         run: cargo fmt -- --check
       - name: Run benchmarks as tests
         run: cargo test --locked --benches -- adobe_example
-      - name: Build
-        run: cargo build --locked
+
+      - name: Set build mode
+        shell: bash
+        run: if [ "${{github.ref_type}}" == "tag" || ${{ github.event_name == 'push' && github.ref_name == 'main' }} ]; then echo "BMODE=release">>"$GITHUB_ENV"; fi
+
+      - name: Build in ${{env.BMODE || 'debug'}} mode
+        run: cargo build --verbose --locked --${{env.BMODE}}
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{env.BMODE || 'debug'}}/tdf${{ matrix.ext }}" dist/tdf-${{ matrix.target }}${{ matrix.ext }}
+          tree dist || ls -la dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: tdf-${{ matrix.target }}
+          path: dist/tdf*
+       
+  tag-release:
+    name: Release on tag push
+    runs-on: ubuntu-slim
+    if: github.ref_type == 'tag'
+    needs: test-build
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: "**/tdf-*"
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: What's up?
+        run: tree release-artifacts # beautiful!
+
+      - name: Create a GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          # draft: true
+          generate_release_notes: true
+          files: release-artifacts/*
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+
+  tip-release:
+    name: Release tip on push to main
+    runs-on: ubuntu-slim
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    needs: test-build
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download prebuilt artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate release notes
+        run: |
+          tree release-artifacts/
+          echo "From commit: $(git rev-parse --short HEAD)" > ${{ env.tip_release_path }}
+          echo "Generated on: $(date -u +"%Y-%m-%d %H:%M") UTC" >> ${{ env.tip_release_path }}
+          cat ${{ env.tip_release_path }}
+
+      - name: Update the tip tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag --force tip && git push --force origin tag tip
+
+      - name: Update the draft tip release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          files: release-artifacts/*
+          tag_name: tip
+          name: Tip Build
+          body_path: ${{ env.tip_release_path }}

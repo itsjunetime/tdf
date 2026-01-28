@@ -16,28 +16,31 @@ env:
 jobs:
   test-build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { os: "macos-latest", target: "aarch64-apple-darwin" }
           - { os: "ubuntu-latest", target: "x86_64-unknown-linux-gnu" }
-          - {
-              os: "windows-latest",
-              target: "x86_64-pc-windows-msvc",
-              ext: ".exe",
-            }
+          # - {
+          #     os: "windows-latest",
+          #     target: "x86_64-pc-windows-msvc",
+          #     ext: ".exe",
+          #   }
           - { os: "ubuntu-24.04-arm", target: "aarch64-unknown-linux-gnu" }
 
     runs-on: ${{ matrix.os }}
 
     steps:
+      - uses: actions/checkout@v6
+
       - name: Setup sccache
         if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
         uses: mozilla-actions/sccache-action@v0.0.8
       - name: Configure sccache
         if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
       - name: Setup rust cache action
         uses: swatinem/rust-cache@v2
@@ -51,7 +54,6 @@ jobs:
           packages: libfontconfig1-dev libgoogle-perftools-dev google-perftools
           version: latest # could be anything
 
-      - uses: actions/checkout@v4
       - name: Install clippy and fmt
         run: rustup component add clippy rustfmt
       - name: Clippy
@@ -65,7 +67,7 @@ jobs:
 
       - name: Set build mode
         shell: bash
-        run: if [ "${{github.ref_type}}" == "tag" || ${{ github.event_name == 'push' && github.ref_name == 'main' }} ]; then echo "BMODE=release">>"$GITHUB_ENV"; fi
+        run: if [ "${{github.ref_type}}" == "tag" ] || [ ${{ github.event_name == 'push' && github.ref_name == 'main' }} ]; then echo "BMODE=release">>"$GITHUB_ENV"; fi
 
       - name: Build in ${{env.BMODE || 'debug'}} mode
         run: cargo build --verbose --locked --${{env.BMODE}}

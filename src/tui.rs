@@ -136,6 +136,12 @@ impl Zoom {
 	fn pan_top(&mut self) {
 		self.cell_pan_from_top = u16::MAX;
 	}
+	fn pan_left(&mut self) {
+		self.cell_pan_from_left = 0;
+	}
+	fn pan_right(&mut self) {
+		self.cell_pan_from_left = u16::MAX;
+	}
 }
 #[derive(Clone, Copy, Debug)]
 enum Direction {
@@ -828,6 +834,8 @@ impl Tui {
 							'J' if can_zoom => self.update_zoom(|z| z.pan(Direction::Down)),
 							'K' if can_zoom => self.update_zoom(|z| z.pan(Direction::Up)),
 							'G' if can_zoom => self.update_zoom(Zoom::pan_top),
+							'0' if can_zoom => self.update_zoom(Zoom::pan_left),
+							'$' if can_zoom => self.update_zoom(Zoom::pan_right),
 							_ => None
 						}
 					}

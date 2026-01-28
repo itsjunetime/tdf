@@ -2,41 +2,40 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - name: Setup sccache
-      if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-      uses: mozilla-actions/sccache-action@v0.0.8
-    - name: Configure sccache
-      if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-      run: |
-        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libfontconfig1-dev libgoogle-perftools-dev google-perftools
-    - uses: actions/checkout@v4
-    - name: Install clippy and fmt
-      run: rustup component add clippy rustfmt
-    - name: Clippy
-      run: cargo clippy --locked -- -D warnings
-    - name: Tests
-      run: cargo test --locked
-    - name: Check fmt
-      run: cargo fmt -- --check
-    - name: Run benchmarks as tests
-      run: cargo test --locked --benches -- adobe_example
-    - name: Build
-      run: cargo build --locked
+      - name: Setup sccache
+        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+        uses: mozilla-actions/sccache-action@v0.0.8
+      - name: Configure sccache
+        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libgoogle-perftools-dev google-perftools
+      - uses: actions/checkout@v4
+      - name: Install clippy and fmt
+        run: rustup component add clippy rustfmt
+      - name: Clippy
+        run: cargo clippy --locked -- -D warnings
+      - name: Tests
+        run: cargo test --locked
+      - name: Check fmt
+        run: cargo fmt -- --check
+      - name: Run benchmarks as tests
+        run: cargo test --locked --benches -- adobe_example
+      - name: Build
+        run: cargo build --locked

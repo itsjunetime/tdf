@@ -103,7 +103,7 @@ jobs:
       - name: Create a GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          # draft: true
+          draft: true
           generate_release_notes: true
           files: release-artifacts/*
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}

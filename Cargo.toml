@@ -23,10 +23,10 @@ name = "tdf"
 
 [dependencies]
 # we're using this branch because it has significant performance fixes that I'm waiting on responses from the upstream devs to get upstreamed. See https://github.com/ratatui-org/ratatui/issues/1116
-ratatui = { git = "https://github.com/itsjunetime/ratatui.git" }
+ratatui = { git = "https://github.com/itsjunetime/ratatui.git", rev = "6a0b8ddf76ed9ecd88578766f5c90e8938bf0c43" }
 # ratatui = { path = "./ratatui/ratatui/" }
 # We're using this to have the vb64 feature (for faster base64 encoding, since that does take up a good bit of time when converting images to the `Protocol`. It also just includes a few more features that I'm waiting on main to upstream
-ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", branch = "vb64_on_personal", default-features = false }
+ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", rev = "9440725af0961ed528e81a54aa1af1ebcc733f2d", default-features = false }
 # ratatui-image = { path = "./ratatui-image", default-features = false }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 # crossterm = { path = "../crossterm", features = ["event-stream"] }
@@ -34,10 +34,10 @@ image = { version = "0.25.1", features = ["pnm", "rayon", "png"], default-featur
 notify = { version = "8.0.0", features = ["crossbeam-channel"] }
 tokio = { version = "1.37.0", features = ["rt-multi-thread", "macros"] }
 futures-util = { version = "0.3.30", default-features = false }
-flume = { version = "0.11.0", default-features = false, features = ["async"] }
+flume = { version = "0.12.0", default-features = false, features = ["async"] }
 xflags = "0.4.0-pre.2"
 mimalloc = "0.1.43"
-nix = { version = "0.30.0", features = ["signal"] }
+nix = { version = "0.31.0", features = ["signal"] }
 mupdf = { git = "https://github.com/messense/mupdf-rs.git", rev = "2e0fae910fac8048c7008211fc4d3b9f5d227a07", default-features = false, features = ["svg", "system-fonts", "img"] }
 rayon = { version = "1", default-features = false }
 # kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
@@ -64,7 +64,7 @@ epub = ["mupdf/epub"]
 cbz = ["mupdf/cbz"]
 
 [dev-dependencies]
-criterion = { version = "0.7.0", features = ["async_tokio"] }
+criterion = { version = "0.8.0", features = ["async_tokio"] }
 cpuprofiler = "0.0.4"
 
 [[bench]]

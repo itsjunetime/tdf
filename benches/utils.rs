@@ -116,6 +116,7 @@ pub fn start_converting_loop(
 	let (to_converter_tx, from_main_rx) = unbounded();
 	let (to_main_tx, from_converter_rx) = unbounded();
 
+	#[expect(deprecated)]
 	let mut picker = Picker::from_fontsize(FONT_SIZE);
 	picker.set_protocol_type(proto);
 

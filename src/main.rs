@@ -246,8 +246,13 @@ async fn inner_main() -> Result<(), WrappedErr> {
 				window_size.width != 0
 				&& window_size.height != 0
 				&& window_size.columns != 0
-				&& window_size.rows != 0
-					=> Ok(Picker::from_fontsize((cell_width_px, cell_height_px))),
+				&& window_size.rows != 0 =>
+			{
+				// the 'equivalent' that is suggested instead is not the same. We need to keep
+				// calling this.
+				#[expect(deprecated)]
+				Ok(Picker::from_fontsize((cell_width_px, cell_height_px)))
+			},
 			ratatui_image::errors::Errors::NoFontSize => Err(WrappedErr(
 				"Unable to detect your terminal's font size; this is an issue with your terminal emulator.\nPlease use a different terminal emulator or report this bug to tdf.".into()
 			)),

@@ -23,10 +23,10 @@ name = "tdf"
 
 [dependencies]
 # we're using this branch because it has significant performance fixes that I'm waiting on responses from the upstream devs to get upstreamed. See https://github.com/ratatui-org/ratatui/issues/1116
-ratatui = { git = "https://github.com/itsjunetime/ratatui.git", rev = "6a0b8ddf76ed9ecd88578766f5c90e8938bf0c43" }
+ratatui = { git = "https://github.com/itsjunetime/ratatui.git", rev = "4209a4e7e8bff298d8f18c220eb29423c293177b", default-features = false, features = [ "crossterm", "layout-cache" ] }
 # ratatui = { path = "./ratatui/ratatui/" }
 # We're using this to have the vb64 feature (for faster base64 encoding, since that does take up a good bit of time when converting images to the `Protocol`. It also just includes a few more features that I'm waiting on main to upstream
-ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", rev = "9440725af0961ed528e81a54aa1af1ebcc733f2d", default-features = false }
+ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", rev = "cd865215737d18980379b69d20918d22f6357dda", default-features = false }
 # ratatui-image = { path = "./ratatui-image", default-features = false }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 # crossterm = { path = "../crossterm", features = ["event-stream"] }
@@ -44,6 +44,7 @@ rayon = { version = "1", default-features = false }
 kittage = { version = "0.1.1", features = ["crossterm-tokio", "image-crate", "log"] }
 memmap2 = "0"
 csscolorparser = { version = "0.8.0", default-features = false }
+debounce = "0.2.2"
 
 # logging
 log = "0.4.27"
@@ -51,7 +52,6 @@ flexi_logger = "0.31"
 
 # for tracing with tokio-console
 console-subscriber = { version = "0.5.0", optional = true }
-debounce = "0.2.2"
 
 [profile.production]
 inherits = "release"

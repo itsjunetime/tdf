@@ -1,7 +1,7 @@
 use std::{borrow::Cow, io::stdout, num::NonZeroUsize};
 
 use crossterm::{
-	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
+	event::{Event, KeyCode, KeyModifiers, MouseEventKind, MouseButton},
 	execute,
 	terminal::{
 		BeginSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
@@ -605,6 +605,68 @@ impl Tui {
 		self.rendered[page_num].num_results = Some(num_results);
 	}
 
+	/// Map a terminal cell click (col, row) to a displayed page and MuPDF coordinates.
+	/// Returns (page_index, mupdf_x_px, mupdf_y_px) if the click hits a page image.
+	#[must_use]
+	pub fn map_click_to_page(
+		&self,
+		col: u16,
+		row: u16,
+		full_layout: &RenderLayout,
+		font_size: FontSize
+	) -> Option<(usize, f32, f32)> {
+		let img_area = full_layout.page_area;
+
+		// Use the pages_shown and unused_width computed during render to match exactly.
+		let pages_shown = self.last_render.pages_shown;
+		let unused_width = self.last_render.unused_width;
+
+		if pages_shown == 0 {
+			return None;
+		}
+
+		// Collect the shown pages and their widths in the same order `render` would render
+		let mut page_infos: Vec<(usize, u16)> = self
+			.rendered[self.page..]
+			.iter()
+			.take(pages_shown)
+			.enumerate()
+			.filter_map(|(idx, p)| p.img.as_ref().map(|img| (self.page + idx, img.w_h().0)))
+			.collect();
+
+		if self.page_constraints.r_to_l {
+			page_infos.reverse();
+		}
+
+		let mut x = img_area.x + (unused_width / 2);
+
+		// iterate through displayed pages and see if click falls into one
+		for (page_num, cell_w) in page_infos {
+			let area = Rect {
+				x,
+				y: img_area.y,
+				width: cell_w,
+				height: img_area.height,
+			};
+			if col >= area.x
+				&& col < area.x + area.width
+				&& row >= area.y
+				&& row < area.y + area.height
+			{
+				// compute local cell offset within this page's rendered area
+				let local_col = col - area.x;
+				let local_row = row - area.y;
+				let mupdf_x = f32::from(local_col) * f32::from(font_size.0);
+				let mupdf_y = f32::from(local_row) * f32::from(font_size.1);
+				return Some((page_num, mupdf_x, mupdf_y));
+			}
+
+			x += cell_w;
+		}
+
+		None
+	}
+
 	pub fn render_top_and_bottom(
 		(top_area, bottom_area): (Rect, Rect),
 		page_num: usize,
@@ -951,6 +1013,13 @@ impl Tui {
 					MouseEventKind::ScrollDown => handle_scroll(Direction::Down),
 					MouseEventKind::ScrollLeft => handle_scroll(Direction::Left),
 					MouseEventKind::ScrollUp => handle_scroll(Direction::Up),
+					MouseEventKind::Down(MouseButton::Left) => {
+						// click with terminal cell coords
+						Some(InputAction::Click {
+							col: mouse.column,
+							row: mouse.row
+						})
+					}
 					_ => None
 				}
 			}
@@ -1116,7 +1185,9 @@ pub enum InputAction {
 	QuitApp,
 	Invert,
 	Fullscreen,
-	SwitchRenderZoom(crate::FitOrFill)
+	SwitchRenderZoom(crate::FitOrFill),
+	/// Mouse left-click at terminal cell (column, row)
+	Click { col: u16, row: u16 }
 }
 
 #[derive(Copy, Clone)]

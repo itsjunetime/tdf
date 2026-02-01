@@ -45,6 +45,7 @@ kittage = { version = "0.1.1", features = ["crossterm-tokio", "image-crate", "lo
 memmap2 = "0"
 csscolorparser = { version = "0.8.0", default-features = false }
 debounce = "0.2.2"
+webbrowser = "0.8"
 
 # logging
 log = "0.4.27"
@@ -70,10 +71,6 @@ cpuprofiler = "0.0.4"
 [[bench]]
 name = "rendering"
 harness = false
-
-[[bin]]
-name = "for_profiling"
-path = "./benches/for_profiling.rs"
 
 [lints.clippy]
 alloc_instead_of_core = "warn"
@@ -107,7 +104,7 @@ doc_link_code = "warn"
 doc_link_with_quotes = "warn"
 elidable_lifetime_names = "warn"
 empty_drop = "warn"
-empty_enums = "warn"
+empty_enum = "warn"
 empty_enum_variants_with_brackets = "warn"
 empty_structs_with_brackets = "warn"
 equatable_if_let = "warn"

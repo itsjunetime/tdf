@@ -67,7 +67,7 @@ jobs:
 
       - name: Set build mode
         shell: bash
-        run: if [ "${{github.ref_type}}" == "tag" ] || [ ${{ github.event_name == 'push' && github.ref_name == 'main' }} ]; then echo "BMODE=profile production">>"$GITHUB_ENV"; fi
+        run: if [ "${{github.ref_type}}" == "tag" ] || [ ${{ github.event_name == 'push' && github.ref_name == 'main' }} ]; then echo "BMODE=production">>"$GITHUB_ENV"; fi
 
       - name: Build in ${{env.BMODE || 'debug'}} mode
         run: cargo build --verbose --locked --${{env.BMODE}}

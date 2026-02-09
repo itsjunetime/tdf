@@ -14,9 +14,11 @@ use kittage::{
 	display::{CursorMovementPolicy, DisplayConfig, DisplayLocation},
 	error::TransmitError,
 	image::Image,
-	medium::Medium
+	medium::Medium,
+	tmux::TmuxWriter
 };
 use ratatui::layout::Position;
+use smallvec::SmallVec;
 
 use crate::converter::MaybeTransferred;
 
@@ -30,7 +32,7 @@ pub struct KittyReadyToDisplay<'tui> {
 pub enum KittyDisplay<'tui> {
 	NoChange,
 	ClearImages,
-	DisplayImages(Vec<KittyReadyToDisplay<'tui>>)
+	DisplayImages(SmallVec<[KittyReadyToDisplay<'tui>; 1]>)
 }
 
 pub struct DbgWriter<W: Write> {
@@ -62,6 +64,7 @@ impl<W: Write> Write for DbgWriter<W> {
 
 pub async fn run_action<'es>(
 	action: Action<'_, '_>,
+	is_tmux: bool,
 	ev_stream: &'es mut EventStream
 ) -> Result<ImageId, TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>> {
 	let writer = DbgWriter {
@@ -69,13 +72,21 @@ pub async fn run_action<'es>(
 		#[cfg(debug_assertions)]
 		buf: String::new()
 	};
-	action
-		.execute_async(writer, ev_stream)
-		.await
-		.map(|(_, i)| i)
+
+	if is_tmux {
+		action
+			.execute_async(TmuxWriter::new(writer), ev_stream)
+			.await
+			.map(|(_, i)| i)
+	} else {
+		action
+			.execute_async(writer, ev_stream)
+			.await
+			.map(|(_, i)| i)
+	}
 }
 
-pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
+pub async fn do_shms_work(is_tmux: bool, ev_stream: &mut EventStream) -> bool {
 	let img = DynamicImage::new_rgb8(1, 1);
 	let pid = std::process::id();
 	let Ok(mut k_img) = kittage::image::Image::shm_from(img, &format!("tdf_test_{pid}")) else {
@@ -87,24 +98,42 @@ pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
 
 	enable_raw_mode().unwrap();
 
-	let res = run_action(Action::Query(&k_img), ev_stream).await;
+	let res = run_action(Action::Query(&k_img), is_tmux, ev_stream).await;
 
 	disable_raw_mode().unwrap();
 
 	res.is_ok()
 }
 
+pub struct DisplayErr<E> {
+	pub page_nums_failed_to_transfer: Vec<usize>,
+	pub user_facing_err: &'static str,
+	pub source: E
+}
+
+impl<E> DisplayErr<E> {
+	pub fn new(
+		page_nums_failed_to_transfer: Vec<usize>,
+		user_facing_err: &'static str,
+		source: E
+	) -> Self {
+		Self {
+			page_nums_failed_to_transfer,
+			user_facing_err,
+			source
+		}
+	}
+
+	fn new_no_imgs(user_facing_err: &'static str, source: E) -> Self {
+		Self::new(vec![], user_facing_err, source)
+	}
+}
+
 pub async fn display_kitty_images<'es>(
 	display: KittyDisplay<'_>,
+	is_tmux: bool,
 	ev_stream: &'es mut EventStream
-) -> Result<
-	(),
-	(
-		Vec<usize>,
-		&'static str,
-		TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>
-	)
-> {
+) -> Result<(), DisplayErr<TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>>> {
 	let images = match display {
 		KittyDisplay::NoChange => return Ok(()),
 		KittyDisplay::DisplayImages(_) | KittyDisplay::ClearImages => {
@@ -113,10 +142,11 @@ pub async fn display_kitty_images<'es>(
 					effect: ClearOrDelete::Clear,
 					which: WhichToDelete::All
 				}),
+				is_tmux,
 				ev_stream
 			)
 			.await
-			.map_err(|e| (vec![], "Couldn't clear previous images", e))?;
+			.map_err(|e| DisplayErr::new_no_imgs("Couldn't clear previous images", e))?;
 
 			let KittyDisplay::DisplayImages(images) = display else {
 				return Ok(());
@@ -169,17 +199,13 @@ pub async fn display_kitty_images<'es>(
 						config,
 						placement_id: None
 					},
+					is_tmux,
 					ev_stream
 				)
 				.await;
 
-				match res {
-					Ok(img_id) => {
-						*img = MaybeTransferred::Transferred(img_id);
-						Ok(())
-					}
-					Err(e) => Err((page_num, e))
-				}
+				res.map(|img_id| *img = MaybeTransferred::Transferred(img_id))
+					.map_err(|e| (page_num, e))
 			}
 			MaybeTransferred::Transferred(image_id) => run_action(
 				Action::Display {
@@ -187,6 +213,7 @@ pub async fn display_kitty_images<'es>(
 					placement_id: *image_id,
 					config
 				},
+				is_tmux,
 				ev_stream
 			)
 			.await
@@ -203,7 +230,11 @@ pub async fn display_kitty_images<'es>(
 	}
 
 	match err {
-		Some((replace, e)) => Err((replace, "Couldn't transfer image to the terminal", e)),
+		Some((replace, e)) => Err(DisplayErr::new(
+			replace,
+			"Couldn't transfer image to the terminal",
+			e
+		)),
 		None => Ok(())
 	}
 }

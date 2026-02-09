@@ -38,7 +38,7 @@ use ratatui_image::{
 use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
-	kitty::{KittyDisplay, display_kitty_images, do_shms_work, run_action},
+	kitty::{DisplayErr, KittyDisplay, display_kitty_images, do_shms_work, run_action},
 	renderer::{self, MUPDF_BLACK, MUPDF_WHITE, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
 };
@@ -289,8 +289,9 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let (to_main, from_converter) = flume::unbounded();
 
 	let is_kitty = picker.protocol_type() == ProtocolType::Kitty;
+	let is_tmux = picker.is_tmux();
 
-	let shms_work = is_kitty && do_shms_work(&mut ev_stream).await;
+	let shms_work = is_kitty && do_shms_work(is_tmux, &mut ev_stream).await;
 
 	tokio::spawn(run_conversion_loop(
 		to_main, from_main, picker, 20, shms_work
@@ -320,6 +321,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 				effect: ClearOrDelete::Delete,
 				which: WhichToDelete::IdRange(NonZeroU32::new(1).unwrap()..=NonZeroU32::MAX)
 			}),
+			is_tmux,
 			&mut ev_stream
 		)
 		.await
@@ -348,6 +350,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		to_converter,
 		from_converter,
 		fullscreen,
+		is_tmux,
 		tui,
 		&mut term,
 		main_area,
@@ -376,6 +379,7 @@ async fn enter_redraw_loop(
 	to_converter: Sender<ConverterMsg>,
 	mut from_converter: RecvStream<'_, Result<ConvertedPage, RenderError>>,
 	mut fullscreen: bool,
+	is_tmux: bool,
 	mut tui: Tui,
 	term: &mut Terminal<CrosstermBackend<Stdout>>,
 	mut main_area: tdf::tui::RenderLayout,
@@ -452,10 +456,15 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area, font_size);
 			})?;
 
-			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
+			let maybe_err = display_kitty_images(to_display, is_tmux, &mut ev_stream).await;
 
-			if let Err((to_replace, err_desc, enum_err)) = maybe_err {
-				match enum_err {
+			if let Err(DisplayErr {
+				page_nums_failed_to_transfer,
+				user_facing_err,
+				source
+			}) = maybe_err
+			{
+				match source {
 					// This is the error that kitty & ghostty provide us when they delete an
 					// image due to memory constraints, so if we get it, we just fix it by
 					// re-rendering so it don't display it to the user
@@ -465,11 +474,11 @@ async fn enter_redraw_loop(
 					// they were, we re-render them? idk
 					TransmitError::Terminal(TerminalError::NoEntity(_)) => (),
 					_ => tui.set_msg(MessageSetting::Some(BottomMessage::Error(format!(
-						"{err_desc}: {enum_err}"
+						"{user_facing_err}: {source}"
 					))))
 				}
 
-				for page_num in to_replace {
+				for page_num in page_nums_failed_to_transfer {
 					tui.page_failed_display(page_num);
 					// So that they get re-rendered and sent over again
 					to_renderer.send(RenderNotif::PageNeedsReRender(page_num))?;

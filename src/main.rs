@@ -298,8 +298,9 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let (to_main, from_converter) = flume::unbounded();
 
 	let is_kitty = picker.protocol_type() == ProtocolType::Kitty;
+	let is_tmux = picker.is_tmux();
 
-	let shms_work = is_kitty && do_shms_work(&mut ev_stream).await;
+	let shms_work = is_kitty && do_shms_work(is_tmux, &mut ev_stream).await;
 
 	tokio::spawn(run_conversion_loop(
 		to_main, from_main, picker, 20, shms_work
@@ -329,6 +330,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 				effect: ClearOrDelete::Delete,
 				which: WhichToDelete::IdRange(NonZeroU32::new(1).unwrap()..=NonZeroU32::MAX)
 			}),
+			is_tmux,
 			&mut ev_stream
 		)
 		.await
@@ -357,6 +359,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		to_converter,
 		from_converter,
 		fullscreen,
+		is_tmux,
 		tui,
 		&mut term,
 		main_area,
@@ -385,6 +388,7 @@ async fn enter_redraw_loop(
 	to_converter: Sender<ConverterMsg>,
 	mut from_converter: RecvStream<'_, Result<ConvertedPage, RenderError>>,
 	mut fullscreen: bool,
+	is_tmux: bool,
 	mut tui: Tui,
 	term: &mut Terminal<CrosstermBackend<Stdout>>,
 	mut main_area: tdf::tui::RenderLayout,
@@ -462,7 +466,7 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area, font_size);
 			})?;
 
-			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
+			let maybe_err = display_kitty_images(to_display, is_tmux, &mut ev_stream).await;
 
 			if let Err(DisplayErr {
 				failed_pages,

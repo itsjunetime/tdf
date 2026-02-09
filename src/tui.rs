@@ -19,6 +19,7 @@ use ratatui::{
 	widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap}
 };
 use ratatui_image::{FontSize, Image};
+use smallvec::SmallVec;
 
 use crate::{
 	FitOrFill,
@@ -329,7 +330,7 @@ impl Tui {
 			.cell_pan_from_top
 			.min(img_cell_h.saturating_sub(img_section_h.ceil() as u16));
 
-		KittyDisplay::DisplayImages(vec![KittyReadyToDisplay {
+		KittyDisplay::DisplayImages(SmallVec::from([KittyReadyToDisplay {
 			img,
 			page_num,
 			pos: Position {
@@ -345,7 +346,7 @@ impl Tui {
 				rows: img_area.height,
 				..DisplayLocation::default()
 			}
-		}])
+		}]))
 	}
 
 	#[must_use]
@@ -487,7 +488,7 @@ impl Tui {
 						display_loc: DisplayLocation::default()
 					})
 				})
-				.collect::<Vec<_>>();
+				.collect::<SmallVec<_>>();
 
 			// we want to set this at the very end so it doesn't get set somewhere halfway through and
 			// then the whole diffing thing messes it up

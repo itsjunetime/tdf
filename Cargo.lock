@@ -2391,7 +2391,7 @@ dependencies = [
 [[package]]
 name = "ratatui-image"
 version = "10.0.5"
-source = "git+https://github.com/itsjunetime/ratatui-image.git?rev=a276a87cb8e2976442c6cc59db831db81551da89#a276a87cb8e2976442c6cc59db831db81551da89"
+source = "git+https://github.com/itsjunetime/ratatui-image.git?rev=8ad154a219c1e4832a378bd07aaf39b3ddff959b#8ad154a219c1e4832a378bd07aaf39b3ddff959b"
 dependencies = [
  "base64-simd",
  "icy_sixel",

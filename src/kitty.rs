@@ -15,7 +15,8 @@ use kittage::{
 	display::{CursorMovementPolicy, DisplayConfig, DisplayLocation},
 	error::TransmitError,
 	image::Image,
-	medium::Medium
+	medium::Medium,
+	tmux::TmuxWriter
 };
 use ratatui::layout::Position;
 use smallvec::SmallVec;
@@ -32,7 +33,7 @@ pub struct KittyReadyToDisplay<'tui> {
 pub enum KittyDisplay<'tui> {
 	NoChange,
 	ClearImages,
-	DisplayImages(Vec<KittyReadyToDisplay<'tui>>)
+	DisplayImages(SmallVec<[KittyReadyToDisplay<'tui>; 1]>)
 }
 
 pub struct DbgWriter<W: Write> {
@@ -64,6 +65,7 @@ impl<W: Write> Write for DbgWriter<W> {
 
 pub async fn run_action<'es>(
 	action: Action<'_, '_>,
+	is_tmux: bool,
 	ev_stream: &'es mut EventStream
 ) -> Result<Option<ImageId>, TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>> {
 	let writer = DbgWriter {
@@ -71,13 +73,21 @@ pub async fn run_action<'es>(
 		#[cfg(debug_assertions)]
 		buf: String::new()
 	};
-	action
-		.execute_async(writer, ev_stream)
-		.await
-		.map(|(_, i)| i)
+
+	if is_tmux {
+		action
+			.execute_async(TmuxWriter::new(writer), ev_stream)
+			.await
+			.map(|(_, i)| i)
+	} else {
+		action
+			.execute_async(writer, ev_stream)
+			.await
+			.map(|(_, i)| i)
+	}
 }
 
-pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
+pub async fn do_shms_work(is_tmux: bool, ev_stream: &mut EventStream) -> bool {
 	let img = DynamicImage::new_rgb8(1, 1);
 	let pid = std::process::id();
 	let shm_name = format!("tdf_test_{pid}");
@@ -94,7 +104,7 @@ pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
 
 	enable_raw_mode().unwrap();
 
-	let res = run_action(Action::Query(&k_img), ev_stream).await;
+	let res = run_action(Action::Query(&k_img), is_tmux, ev_stream).await;
 
 	disable_raw_mode().unwrap();
 
@@ -139,6 +149,7 @@ impl Display for DisplayErrSource<'_> {
 
 pub async fn display_kitty_images<'es>(
 	display: KittyDisplay<'_>,
+	is_tmux: bool,
 	ev_stream: &'es mut EventStream
 ) -> Result<(), DisplayErr<'es>> {
 	let images = match display {
@@ -149,6 +160,7 @@ pub async fn display_kitty_images<'es>(
 					effect: ClearOrDelete::Clear,
 					which: WhichToDelete::All
 				}),
+				is_tmux,
 				ev_stream
 			)
 			.await
@@ -205,6 +217,7 @@ pub async fn display_kitty_images<'es>(
 						config,
 						placement_id: None
 					},
+					is_tmux,
 					ev_stream
 				)
 				.await;
@@ -224,6 +237,7 @@ pub async fn display_kitty_images<'es>(
 					placement_id: *image_id,
 					config
 				},
+				is_tmux,
 				ev_stream
 			)
 			.await

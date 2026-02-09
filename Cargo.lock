@@ -1526,9 +1526,9 @@ dependencies = [
 
 [[package]]
 name = "kittage"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be6b61789e2841119b210569d4acd950d47dae805f8d3235190d28cb40677632"
+checksum = "c81351cedc5b58dec7e5131ab6cb35c437bfeed6b4a16c9faf019a993a4056c9"
 dependencies = [
  "base64-simd",
  "crossterm",
@@ -2398,7 +2398,7 @@ dependencies = [
 [[package]]
 name = "ratatui-image"
 version = "10.0.5"
-source = "git+https://github.com/itsjunetime/ratatui-image.git?rev=a276a87cb8e2976442c6cc59db831db81551da89#a276a87cb8e2976442c6cc59db831db81551da89"
+source = "git+https://github.com/itsjunetime/ratatui-image.git?rev=8ad154a219c1e4832a378bd07aaf39b3ddff959b#8ad154a219c1e4832a378bd07aaf39b3ddff959b"
 dependencies = [
  "base64-simd",
  "icy_sixel",
@@ -2869,6 +2869,7 @@ dependencies = [
  "ratatui",
  "ratatui-image",
  "rayon",
+ "smallvec",
  "tokio",
  "xflags",
 ]
@@ -3535,9 +3536,9 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "winmmf"
-version = "0.5.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71505e812c82834e7a5a31481592e5c244d7f9177a28fb88817dfa8360b40021"
+checksum = "859506e40270a5938da41bb216376bae2e681ed8027392bddc068d62d74243f8"
 dependencies = [
  "fixedstr",
  "microseh",

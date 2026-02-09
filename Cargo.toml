@@ -23,10 +23,10 @@ name = "tdf"
 
 [dependencies]
 # we're using this branch because it has significant performance fixes that I'm waiting on responses from the upstream devs to get upstreamed. See https://github.com/ratatui-org/ratatui/issues/1116
-ratatui = { git = "https://github.com/itsjunetime/ratatui.git", rev = "4209a4e7e8bff298d8f18c220eb29423c293177b", default-features = false, features = [ "crossterm", "layout-cache" ] }
+ratatui = { git = "https://github.com/itsjunetime/ratatui.git", rev = "720ac2d0cad1ac6424364fea74856fec9c100cb1", default-features = false, features = [ "crossterm", "layout-cache" ] }
 # ratatui = { path = "./ratatui/ratatui/" }
 # We're using this to have the vb64 feature (for faster base64 encoding, since that does take up a good bit of time when converting images to the `Protocol`. It also just includes a few more features that I'm waiting on main to upstream
-ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", rev = "cd865215737d18980379b69d20918d22f6357dda", default-features = false }
+ratatui-image = { git = "https://github.com/itsjunetime/ratatui-image.git", rev = "a276a87cb8e2976442c6cc59db831db81551da89", default-features = false }
 # ratatui-image = { path = "./ratatui-image", default-features = false }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 # crossterm = { path = "../crossterm", features = ["event-stream"] }

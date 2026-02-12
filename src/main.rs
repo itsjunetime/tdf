@@ -401,6 +401,7 @@ async fn enter_redraw_loop(
 						},
 						InputAction::Search(term) => to_renderer.send(RenderNotif::Search(term))?,
 						InputAction::Invert => to_renderer.send(RenderNotif::Invert)?,
+						InputAction::Rotate => to_renderer.send(RenderNotif::Rotate)?,
 						InputAction::Fullscreen => fullscreen = !fullscreen,
 						InputAction::SwitchRenderZoom(f_or_f) => {
 							to_renderer.send(RenderNotif::SwitchFitOrFill(f_or_f)).unwrap();

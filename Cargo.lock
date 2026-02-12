@@ -1786,8 +1786,8 @@ dependencies = [
 
 [[package]]
 name = "mupdf"
-version = "0.5.0"
-source = "git+https://github.com/messense/mupdf-rs.git?rev=2e0fae910fac8048c7008211fc4d3b9f5d227a07#2e0fae910fac8048c7008211fc4d3b9f5d227a07"
+version = "0.6.0"
+source = "git+https://github.com/messense/mupdf-rs.git?rev=d7441b9998c92135e329559c0aa71d9dc92cf4de#d7441b9998c92135e329559c0aa71d9dc92cf4de"
 dependencies = [
  "bitflags 2.10.0",
  "font-kit",
@@ -1798,8 +1798,8 @@ dependencies = [
 
 [[package]]
 name = "mupdf-sys"
-version = "0.5.0"
-source = "git+https://github.com/messense/mupdf-rs.git?rev=2e0fae910fac8048c7008211fc4d3b9f5d227a07#2e0fae910fac8048c7008211fc4d3b9f5d227a07"
+version = "0.6.0"
+source = "git+https://github.com/messense/mupdf-rs.git?rev=d7441b9998c92135e329559c0aa71d9dc92cf4de#d7441b9998c92135e329559c0aa71d9dc92cf4de"
 dependencies = [
  "bindgen",
  "cc",

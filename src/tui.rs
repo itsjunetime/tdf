@@ -836,6 +836,7 @@ impl Tui {
 							'G' if can_zoom => self.update_zoom(Zoom::pan_top),
 							'0' if can_zoom => self.update_zoom(Zoom::pan_left),
 							'$' if can_zoom => self.update_zoom(Zoom::pan_right),
+							'r' => Some(InputAction::Rotate),
 							_ => None
 						}
 					}
@@ -1115,6 +1116,7 @@ pub enum InputAction {
 	Search(String),
 	QuitApp,
 	Invert,
+	Rotate,
 	Fullscreen,
 	SwitchRenderZoom(crate::FitOrFill)
 }

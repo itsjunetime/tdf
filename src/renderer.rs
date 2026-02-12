@@ -20,7 +20,8 @@ pub enum RenderNotif {
 	Search(String),
 	SwitchFitOrFill(FitOrFill),
 	Reload,
-	Invert
+	Invert,
+	Rotate
 }
 
 #[derive(Debug)]
@@ -35,6 +36,14 @@ pub enum RenderInfo {
 	Page(PageInfo),
 	SearchResults { page_num: usize, num_results: usize },
 	Reloaded
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RotateDirection {
+	Deg0,
+	Deg90,
+	Deg180,
+	Deg270
 }
 
 #[derive(Clone)]
@@ -98,6 +107,7 @@ pub fn start_rendering(
 
 	let mut stored_doc = None;
 	let mut invert = false;
+	let mut rotate = RotateDirection::Deg0;
 	let mut preserved_area = None;
 	let mut fit_or_fill = FitOrFill::Fit;
 
@@ -238,6 +248,18 @@ pub fn start_rendering(
 							}
 							continue 'render_pages;
 						}
+						RenderNotif::Rotate => {
+							rotate = match rotate {
+								RotateDirection::Deg0 => RotateDirection::Deg90,
+								RotateDirection::Deg90 => RotateDirection::Deg180,
+								RotateDirection::Deg180 => RotateDirection::Deg270,
+								RotateDirection::Deg270 => RotateDirection::Deg0
+							};
+							for page in &mut rendered {
+								page.successful = false;
+							}
+							continue 'render_pages;
+						}
 					}
 				}};
 			}
@@ -301,6 +323,7 @@ pub fn start_rendering(
 					black,
 					white,
 					fit_or_fill,
+					rotate,
 					(area_w, area_h)
 				) {
 					// If that fn returned Some, that means it needed to be re-rendered for some
@@ -455,6 +478,7 @@ fn render_single_page_to_ctx(
 	black: i32,
 	white: i32,
 	fit_or_fill: FitOrFill,
+	rotate: RotateDirection,
 	(area_w, area_h): (f32, f32)
 ) -> Result<RenderedContext, mupdf::error::Error> {
 	let result_rects = match prev_render.num_search_found {
@@ -465,7 +489,12 @@ fn render_single_page_to_ctx(
 
 	// then, get the size of the page
 	let bounds = page.bounds()?;
-	let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+	let page_dim = match rotate {
+		RotateDirection::Deg0 | RotateDirection::Deg180 =>
+			(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0),
+		RotateDirection::Deg90 | RotateDirection::Deg270 =>
+			(bounds.y1 - bounds.y0, bounds.x1 - bounds.x0),
+	};
 
 	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
 	let ScaledResult {
@@ -482,7 +511,13 @@ fn render_single_page_to_ctx(
 	}
 
 	let colorspace = Colorspace::device_rgb();
-	let matrix = Matrix::new_scale(scale_factor, scale_factor);
+	let mut matrix = Matrix::new_scale(scale_factor, scale_factor);
+	match rotate {
+		RotateDirection::Deg0 => matrix.rotate(0.0),
+		RotateDirection::Deg90 => matrix.rotate(90.0),
+		RotateDirection::Deg180 => matrix.rotate(180.0),
+		RotateDirection::Deg270 => matrix.rotate(270.0)
+	};
 
 	let mut pixmap = page.to_pixmap(&matrix, &colorspace, false, false)?;
 	if invert {
@@ -494,6 +529,7 @@ fn render_single_page_to_ctx(
 	let (x_res, y_res) = pixmap.resolution();
 	let new_x = (x_res as f32 * scale_factor) as i32;
 	let new_y = (y_res as f32 * scale_factor) as i32;
+
 	pixmap.set_resolution(new_x, new_y);
 
 	let result_rects = result_rects

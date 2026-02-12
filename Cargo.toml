@@ -38,7 +38,7 @@ flume = { version = "0.12.0", default-features = false, features = ["async"] }
 xflags = "0.4.0-pre.2"
 mimalloc = "0.1.43"
 nix = { version = "0.31.0", features = ["signal"] }
-mupdf = { git = "https://github.com/messense/mupdf-rs.git", rev = "2e0fae910fac8048c7008211fc4d3b9f5d227a07", default-features = false, features = ["svg", "system-fonts", "img"] }
+mupdf = { git = "https://github.com/messense/mupdf-rs.git", rev = "d7441b9998c92135e329559c0aa71d9dc92cf4de", default-features = false, features = ["svg", "system-fonts", "img"] }
 rayon = { version = "1", default-features = false }
 # kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
 kittage = { version = "0.1.1", features = ["crossterm-tokio", "image-crate", "log"] }

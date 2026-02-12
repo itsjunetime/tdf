@@ -253,7 +253,7 @@ pub fn start_rendering(
 								RotateDirection::Deg0 => RotateDirection::Deg90,
 								RotateDirection::Deg90 => RotateDirection::Deg180,
 								RotateDirection::Deg180 => RotateDirection::Deg270,
-								RotateDirection::Deg270 => RotateDirection::Deg0,
+								RotateDirection::Deg270 => RotateDirection::Deg0
 							};
 							for page in &mut rendered {
 								page.successful = false;
@@ -489,8 +489,12 @@ fn render_single_page_to_ctx(
 
 	// then, get the size of the page
 	let bounds = page.bounds()?;
-	let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
-	log::debug!("Bounds: {bounds}");
+	let page_dim = match rotate {
+		RotateDirection::Deg0 => (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0),
+		RotateDirection::Deg90 => (bounds.y1 - bounds.y0, bounds.x1 - bounds.x0),
+		RotateDirection::Deg180 => (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0),
+		RotateDirection::Deg270 => (bounds.y1 - bounds.y0, bounds.x1 - bounds.x0)
+	};
 
 	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
 	let ScaledResult {
@@ -512,7 +516,7 @@ fn render_single_page_to_ctx(
 		RotateDirection::Deg0 => matrix.rotate(0.0),
 		RotateDirection::Deg90 => matrix.rotate(90.0),
 		RotateDirection::Deg180 => matrix.rotate(180.0),
-		RotateDirection::Deg270 => matrix.rotate(270.0),
+		RotateDirection::Deg270 => matrix.rotate(270.0)
 	};
 
 	let mut pixmap = page.to_pixmap(&matrix, &colorspace, false, false)?;
@@ -525,6 +529,7 @@ fn render_single_page_to_ctx(
 	let (x_res, y_res) = pixmap.resolution();
 	let new_x = (x_res as f32 * scale_factor) as i32;
 	let new_y = (y_res as f32 * scale_factor) as i32;
+
 	pixmap.set_resolution(new_x, new_y);
 
 	let result_rects = result_rects

@@ -490,10 +490,10 @@ fn render_single_page_to_ctx(
 	// then, get the size of the page
 	let bounds = page.bounds()?;
 	let page_dim = match rotate {
-		RotateDirection::Deg0 => (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0),
-		RotateDirection::Deg90 => (bounds.y1 - bounds.y0, bounds.x1 - bounds.x0),
-		RotateDirection::Deg180 => (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0),
-		RotateDirection::Deg270 => (bounds.y1 - bounds.y0, bounds.x1 - bounds.x0)
+		RotateDirection::Deg0 | RotateDirection::Deg180 =>
+			(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0),
+		RotateDirection::Deg90 | RotateDirection::Deg270 =>
+			(bounds.y1 - bounds.y0, bounds.x1 - bounds.x0),
 	};
 
 	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);

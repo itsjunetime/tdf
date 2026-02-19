@@ -1108,6 +1108,8 @@ H, J, K, L (when zoomed in):
     Pan direction around page
 0/$ (when on fill-screen):
     Scroll to left/right side of page
+r:
+		Rotate by 90 degrees
 ";
 
 pub enum InputAction {

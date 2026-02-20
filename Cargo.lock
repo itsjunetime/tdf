@@ -1526,9 +1526,9 @@ dependencies = [
 
 [[package]]
 name = "kittage"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "286f284c90c1ef0859325f0dafcf41dcb419e13882541c1fccc69b7ed4bd5385"
+checksum = "171707e2249c1fbfa01806d5203231e8b7eddf1504371c264c612a7db9ad9153"
 dependencies = [
  "base64-simd",
  "crossterm",

@@ -104,7 +104,9 @@ pub fn start_rendering(
 	let mut need_rerender = VecDeque::new();
 
 	'reload: loop {
-		let doc = match Document::open(path) {
+		// we need to do `as_os_str` so that the `AsRef<mupdf::FilePath>` is satisfied for both
+		// windows and unix
+		let doc = match Document::open(path.as_os_str()) {
 			Err(e) => {
 				// if there's an error, tell the main loop
 				sender.send(Err(RenderError::Doc(e)))?;

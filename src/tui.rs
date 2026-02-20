@@ -9,10 +9,6 @@ use crossterm::{
 	}
 };
 use kittage::display::DisplayLocation;
-use nix::{
-	sys::signal::{Signal::SIGSTOP, kill},
-	unistd::Pid
-};
 use ratatui::{
 	Frame,
 	layout::{Constraint, Flex, Layout, Position, Rect},
@@ -801,10 +797,17 @@ impl Tui {
 								.unwrap();
 								disable_raw_mode().unwrap();
 
-								// This process will hang after the SIGSTOP call until we get
-								// foregrounded again by something else, at which point we need to
-								// re-setup everything so that it all gets drawn again.
-								kill(Pid::this(), SIGSTOP).unwrap();
+								#[cfg(unix)]
+								{
+									// This process will hang after the SIGSTOP call until we get
+									// foregrounded again by something else, at which point we need to
+									// re-setup everything so that it all gets drawn again.
+									nix::sys::signal::kill(
+										nix::unistd::Pid::this(),
+										nix::sys::signal::Signal::SIGSTOP
+									)
+									.unwrap();
+								}
 
 								enable_raw_mode().unwrap();
 								execute!(

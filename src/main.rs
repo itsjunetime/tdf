@@ -107,6 +107,8 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		optional -w,--white-color white: String
 		/// Custom black color, specified in css format (e.g "000000" or "rgb(0, 0, 0)")
 		optional -b,--black-color black: String
+		/// Use terminal foreground/background colors for the PDF
+		optional -t,--terminal-colors
 		/// Print the version and exit
 		optional --version
 		/// PDF file to read
@@ -128,6 +130,12 @@ async fn inner_main() -> Result<(), WrappedErr> {
 		.canonicalize()
 		.map_err(|e| WrappedErr(format!("Cannot canonicalize provided file: {e}").into()))?;
 
+	let (default_black, default_white) = if flags.terminal_colors {
+		query_terminal_colors()
+	} else {
+		(MUPDF_BLACK, MUPDF_WHITE)
+	};
+
 	let black = flags
 		.black_color
 		.as_deref()
@@ -142,7 +150,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 			})
 		})
 		.transpose()?
-		.unwrap_or(MUPDF_BLACK);
+		.unwrap_or(default_black);
 
 	let white = flags
 		.white_color
@@ -158,7 +166,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 			})
 		})
 		.transpose()?
-		.unwrap_or(MUPDF_WHITE);
+		.unwrap_or(default_white);
 
 	// need to keep it around throughout the lifetime of the program, but don't rly need to use it.
 	// Just need to make sure it doesn't get dropped yet.
@@ -544,6 +552,52 @@ fn parse_color_to_i32(cs: &str) -> Result<i32, csscolorparser::ParseColorError> 
 	let color = csscolorparser::parse(cs)?;
 	let [r, g, b, _] = color.to_rgba8();
 	Ok(i32::from_be_bytes([0, r, g, b]))
+}
+
+fn query_terminal_colors() -> (i32, i32) {
+	let Ok(()) = enable_raw_mode() else {
+		return (MUPDF_BLACK, MUPDF_WHITE);
+	};
+
+	let fg = query_osc_color(10);
+	let bg = query_osc_color(11);
+
+	let _ = disable_raw_mode();
+
+	(fg.unwrap_or(MUPDF_BLACK), bg.unwrap_or(MUPDF_WHITE))
+}
+
+fn query_osc_color(osc: u8) -> Option<i32> {
+	print!("\x1b]{osc};?\x1b\\");
+	std::io::stdout().flush().unwrap();
+
+	let stdin = std::io::stdin();
+	let mut handle = stdin.lock();
+	let mut buf = Vec::new();
+	let mut byte = [0u8; 1];
+	loop {
+		handle.read_exact(&mut byte).ok()?;
+		if byte[0] == b'\\' || byte[0] == 0x07 {
+			break;
+		}
+		buf.push(byte[0]);
+	}
+	drop(handle);
+
+	let input = String::from_utf8(buf).ok()?;
+	let rgb_str = input.split("rgb:").nth(1)?.trim_end_matches('\x1b');
+
+	let mut parts = rgb_str.split('/');
+	let parse = |hex: &str| -> Option<u8> {
+		let val = u16::from_str_radix(hex, 16).ok()?;
+		Some(if hex.len() <= 2 { val as u8 } else { (val >> 8) as u8 })
+	};
+
+	let r = parse(parts.next()?)?;
+	let g = parse(parts.next()?)?;
+	let b = parse(parts.next()?)?;
+
+	Some(i32::from_be_bytes([0, r, g, b]))
 }
 
 fn get_font_size_through_stdio() -> Result<(u16, u16), WrappedErr> {

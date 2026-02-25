@@ -48,6 +48,9 @@ impl InterleavedAroundWithMax {
 	/// - inclusive_min <= around <= exclusive_max
 	#[must_use]
 	pub fn new(around: usize, inclusive_min: usize, exclusive_max: NonZeroUsize) -> Self {
+		assert!(inclusive_min < exclusive_max.get());
+		assert!(inclusive_min <= around && around <= exclusive_max.get());
+		
 		Self {
 			around,
 			inclusive_min,

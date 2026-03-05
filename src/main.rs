@@ -70,11 +70,18 @@ fn reset_term() {
 	);
 }
 
-#[tokio::main]
-async fn main() -> Result<(), WrappedErr> {
-	let result = inner_main().await;
-	reset_term();
-	result
+fn main() -> Result<(), WrappedErr> {
+	let rt = tokio::runtime::Builder::new_multi_thread()
+		.worker_threads(3)
+		.enable_time()
+		.build()
+		.unwrap();
+
+	rt.block_on(async move {
+		let result = inner_main().await;
+		reset_term();
+		result
+	})
 }
 
 async fn inner_main() -> Result<(), WrappedErr> {

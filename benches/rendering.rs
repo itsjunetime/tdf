@@ -34,7 +34,12 @@ fn for_all_combos(
 	name: &'static str,
 	mut f: impl FnMut(&Runtime, BenchmarkId, &'static str, ProtocolType)
 ) {
-	let rt = tokio::runtime::Runtime::new().unwrap();
+	let rt = tokio::runtime::Builder::new_multi_thread()
+		.worker_threads(3)
+		.enable_time()
+		.build()
+		.unwrap();
+
 	for proto in PROTOS {
 		for file in FILES {
 			f(

@@ -11,7 +11,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  tip_release_path: RELEASE.md
 
 jobs:
   test-build:
@@ -107,39 +106,3 @@ jobs:
           generate_release_notes: true
           files: release-artifacts/*
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-
-  tip-release:
-    name: Release tip on push to main
-    runs-on: ubuntu-slim
-    if: github.event_name == 'push' && github.ref_name == 'main'
-    needs: test-build
-
-    steps:
-      - uses: actions/checkout@v6
-      - name: Download prebuilt artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: release-artifacts
-          merge-multiple: true
-
-      - name: Generate release notes
-        run: |
-          tree release-artifacts/
-          echo "From commit: $(git rev-parse --short HEAD)" > ${{ env.tip_release_path }}
-          echo "Generated on: $(date -u +"%Y-%m-%d %H:%M") UTC" >> ${{ env.tip_release_path }}
-          cat ${{ env.tip_release_path }}
-
-      - name: Update the tip tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag --force tip && git push --force origin tag tip
-
-      - name: Update the draft tip release
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: true
-          files: release-artifacts/*
-          tag_name: tip
-          name: Tip Build
-          body_path: ${{ env.tip_release_path }}

@@ -113,8 +113,15 @@ pub fn start_rendering(
 
 	let mut need_rerender = VecDeque::new();
 
+	#[cfg(windows)]
+	let path = path.to_string_lossy();
+
 	'reload: loop {
-		let doc = match Document::open(path) {
+		// Need to do this weird borrow thing so that we convert `Cow<'_, str>` -> `&str` on windows
+		// and keep unix a `&Path` -> `&Path` 'cause there are different requirements within mupdf
+		// about file paths per-platform
+		#[cfg_attr(unix, expect(clippy::borrow_deref_ref))]
+		let doc = match Document::open(&*path) {
 			Err(e) => {
 				// if there's an error, tell the main loop
 				sender.send(Err(RenderError::Doc(e)))?;

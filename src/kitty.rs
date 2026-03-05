@@ -78,7 +78,12 @@ pub async fn run_action<'es>(
 pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
 	let img = DynamicImage::new_rgb8(1, 1);
 	let pid = std::process::id();
-	let Ok(mut k_img) = kittage::image::Image::shm_from(img, &format!("tdf_test_{pid}")) else {
+	let shm_name = format!("tdf_test_{pid}");
+
+	#[cfg(unix)]
+	let shm_name = &*shm_name;
+
+	let Ok(mut k_img) = kittage::image::Image::shm_from(img, shm_name) else {
 		return false;
 	};
 

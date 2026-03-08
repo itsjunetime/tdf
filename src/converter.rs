@@ -1,11 +1,12 @@
 use std::{
+	io::Cursor,
 	num::NonZeroUsize,
 	time::{SystemTime, UNIX_EPOCH}
 };
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt as _;
-use image::DynamicImage;
+use image::{DynamicImage, codecs::pnm::PnmDecoder};
 use kittage::{NumberOrId, action::NONZERO_ONE};
 use ratatui::layout::Rect;
 use ratatui_image::{
@@ -111,22 +112,26 @@ pub async fn run_conversion_loop(
 			return Ok(None);
 		};
 
-		let mut dyn_img = image::load_from_memory_with_format(
-			&page_info.img_data.pixels,
-			image::ImageFormat::Pnm
-		)
-		.map_err(|e| RenderError::Converting(format!("Can't load image: {e}")))?;
+		let decoder = PnmDecoder::new(Cursor::new(&page_info.img_data.pixels)).map_err(|e| {
+			RenderError::Converting(format!(
+				"The image data provided from mupdf was not in pnm format ({e}); don't know how to convert"
+			))
+		})?;
 
-		match dyn_img {
-			DynamicImage::ImageRgb8(ref mut img) =>
-				for quad in &*page_info.result_rects {
-					img.par_enumerate_pixels_mut()
-						.filter(|(x, y, _)| {
-							*x > quad.ul_x && *x < quad.lr_x && *y > quad.ul_y && *y < quad.lr_y
-						})
-						.for_each(|(_, _, px)| px.0[2] = px.0[2].saturating_sub(u8::MAX / 2));
-				},
-			_ => unreachable!()
+		// The image we get should always already be `ImageRgb8`, so this `into` shouldn't do any
+		// conversions or anything, but just in case some underlying detail of mupdf or image
+		// changes, we do the `into` instead of just `match + unreachable!()` to avoid panicking
+		let mut dyn_img = DynamicImage::from_decoder(decoder)
+			.map_err(|e| RenderError::Converting(format!("Can't load image: {e}")))?
+			.into_rgb8();
+
+		for quad in &*page_info.result_rects {
+			dyn_img
+				.par_enumerate_pixels_mut()
+				.filter(|(x, y, _)| {
+					*x > quad.ul_x && *x < quad.lr_x && *y > quad.ul_y && *y < quad.lr_y
+				})
+				.for_each(|(_, _, px)| px.0[2] = px.0[2].saturating_sub(u8::MAX / 2));
 		}
 
 		let img_area = Rect {
@@ -135,6 +140,8 @@ pub async fn run_conversion_loop(
 			x: 0,
 			y: 0
 		};
+
+		let dyn_img = DynamicImage::ImageRgb8(dyn_img);
 
 		let txt_img = match picker.protocol_type() {
 			ProtocolType::Kitty => {

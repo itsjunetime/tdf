@@ -133,18 +133,18 @@ mod tests {
 	#[test]
 	#[should_panic]
 	fn panics_when_inclusive_min_not_less_than_exclusive_max(){
-		let _ = InterleavedAroundWithMax::new(1, 1, std::num::NonZeroUsize::new(1).unwrap());
+		let _ = InterleavedAroundWithMax::new(1, 1, NonZeroUsize::new(1).unwrap());
 	}
 
 	#[test]
 	#[should_panic]
 	fn panics_when_around_less_than_inclusive_min(){
-		let _ = InterleavedAroundWithMax::new(1, 2, std::num::NonZeroUsize::new(3).unwrap());
+		let _ = InterleavedAroundWithMax::new(1, 2, NonZeroUsize::new(3).unwrap());
 	}
 
 	#[test]
 	#[should_panic]
 	fn panics_when_around_greater_than_exclusive_max(){
-		let _ = InterleavedAroundWithMax::new(2, 0, std::num::NonZeroUsize::new(1).unwrap());
+		let _ = InterleavedAroundWithMax::new(2, 0, NonZeroUsize::new(1).unwrap());
 	}
 }

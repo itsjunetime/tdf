@@ -48,6 +48,9 @@ impl InterleavedAroundWithMax {
 	/// - inclusive_min <= around <= exclusive_max
 	#[must_use]
 	pub fn new(around: usize, inclusive_min: usize, exclusive_max: NonZeroUsize) -> Self {
+		assert!(inclusive_min < exclusive_max.get());
+		assert!(inclusive_min <= around && around <= exclusive_max.get());
+
 		Self {
 			around,
 			inclusive_min,
@@ -125,5 +128,23 @@ mod tests {
 			5, 6, 4, 7, 3, 8, 2, 9, 20, 10, 19, 11, 18, 12, 17, 13, 16, 14, 15, 15, 14, 16, 13, 17,
 			12, 18, 11, 19, 10, 20
 		]);
+	}
+
+	#[test]
+	#[should_panic]
+	fn panics_when_inclusive_min_not_less_than_exclusive_max(){
+		let _ = InterleavedAroundWithMax::new(1, 1, NonZeroUsize::new(1).unwrap());
+	}
+
+	#[test]
+	#[should_panic]
+	fn panics_when_around_less_than_inclusive_min(){
+		let _ = InterleavedAroundWithMax::new(1, 2, NonZeroUsize::new(3).unwrap());
+	}
+
+	#[test]
+	#[should_panic]
+	fn panics_when_around_greater_than_exclusive_max(){
+		let _ = InterleavedAroundWithMax::new(2, 0, NonZeroUsize::new(1).unwrap());
 	}
 }

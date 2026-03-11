@@ -21,6 +21,7 @@ pub enum RenderNotif {
 	SwitchFitOrFill(FitOrFill),
 	Reload,
 	Invert,
+	Rotate,
 	/// Query: which link (if any) is under the provided mupdf pixel coords.
 	/// The renderer replies on the provided Sender with the found link or None.
 	/// If sending fails, the renderer will panic (indicates main thread disconnected).
@@ -28,6 +29,8 @@ pub enum RenderNotif {
 		page: usize,
 		mupdf_x_px: f32,
 		mupdf_y_px: f32,
+		mupdf_w_px: f32,
+		mupdf_h_px: f32,
 		resp: Sender<Result<Option<LinkTarget>, String>>
 	}
 }
@@ -39,6 +42,14 @@ pub enum LinkTarget {
 	Uri(String),
 	/// Internal document destination: page index (0-based)
 	GoTo { page_index: usize }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RotateDirection {
+	Deg0,
+	Deg90,
+	Deg180,
+	Deg270
 }
 
 #[derive(Debug)]
@@ -92,30 +103,83 @@ fn query_link_at(
 	qpage: usize,
 	mupdf_x_px: f32,
 	mupdf_y_px: f32,
+	mupdf_w_px: f32,
+	mupdf_h_px: f32,
 	area_w: f32,
 	area_h: f32,
 	fit_or_fill: FitOrFill,
+	rotate: RotateDirection
 ) -> Result<Option<LinkTarget>, mupdf::error::Error> {
 	// load the requested page and compute same scale as used when rendering
 	let page = doc.load_page(qpage as i32)?;
 	let bounds = page.bounds()?;
 	let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
 	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
-	let scale_factor = scaled.scale_factor;
+	let mut scale_factor = scaled.scale_factor;
 
-	let pdf_x = mupdf_x_px / scale_factor;
-	let pdf_y = mupdf_y_px / scale_factor;
+	let surface_w = scaled.width;
+	let surface_h = scaled.height;
+	if surface_w > KITTY_MAX_W_OR_H || surface_h > KITTY_MAX_W_OR_H {
+		let descale = (surface_w / KITTY_MAX_W_OR_H).max(surface_h / KITTY_MAX_W_OR_H);
+		scale_factor /= descale;
+	}
+
+	let (w, h) = match rotate {
+		RotateDirection::Deg0 | RotateDirection::Deg180 => (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0),
+		RotateDirection::Deg90 | RotateDirection::Deg270 => (bounds.y1 - bounds.y0, bounds.x1 - bounds.x0),
+	};
+	let scr_w = w * scale_factor;
+	let scr_h = h * scale_factor;
+
+	let (sx, sy) = (mupdf_x_px, mupdf_y_px);
+
+	let sx2 = sx + mupdf_w_px;
+	let sy2 = sy + mupdf_h_px;
+	
+	let (dx, dy) = match rotate {
+		RotateDirection::Deg0 => (sx, sy),
+		RotateDirection::Deg90 => (sy, scr_w - sx2),
+		RotateDirection::Deg180 => (scr_w - sx2, scr_h - sy2),
+		RotateDirection::Deg270 => (scr_h - sy2, sx),
+	};
+
+	let (dx2, dy2) = match rotate {
+		RotateDirection::Deg0 => (sx2, sy2),
+		RotateDirection::Deg90 => (sy2, scr_w - sx),
+		RotateDirection::Deg180 => (scr_w - sx, scr_h - sy),
+		RotateDirection::Deg270 => (scr_h - sy, sx2),
+	};
+
+	// Convert cell bounding box into pdf coordinates
+	let mut pdf_x0 = dx / scale_factor + bounds.x0;
+	let mut pdf_y0 = dy / scale_factor + bounds.y0;
+	let mut pdf_x1 = dx2 / scale_factor + bounds.x0;
+	let mut pdf_y1 = dy2 / scale_factor + bounds.y0;
+
+	// Keep x0 < x1 and y0 < y1 (rotation might have swapped min/max)
+	if pdf_x0 > pdf_x1 { std::mem::swap(&mut pdf_x0, &mut pdf_x1); }
+	if pdf_y0 > pdf_y1 { std::mem::swap(&mut pdf_y0, &mut pdf_y1); }
 
 	if let Ok(links) = page.links() {
 		for link in links {
 			let lb = link.bounds;
-			if pdf_x >= lb.x0 && pdf_x <= lb.x1 && pdf_y >= lb.y0 && pdf_y <= lb.y1 {
-				// prefer URI if present and non-empty
-				if !link.uri.is_empty() {
-					return Ok(Some(LinkTarget::Uri(link.uri)));
-				}
+			// intersection test of the cell's bbox vs the link's bbox
+			if pdf_x0 <= lb.x1 && pdf_x1 >= lb.x0 && pdf_y0 <= lb.y1 && pdf_y1 >= lb.y0 {
+				// `open` fails on internal `#page=...` URIs, so handle internal destinations first
 				if let Some(dest) = link.dest {
 					return Ok(Some(LinkTarget::GoTo { page_index: dest.loc.page_number as usize }));
+				} else if link.uri.starts_with("#page=") {
+					// In some PDFs, mupdf exposes internal links as `#page=X` in the uri
+					// PDF page numbers in this fragment are typically 1-indexed
+					let mut page_str = &link.uri["#page=".len()..];
+					if let Some((num, _)) = page_str.split_once('&') {
+						page_str = num;
+					}
+					if let Ok(page_num) = page_str.parse::<usize>() {
+						return Ok(Some(LinkTarget::GoTo { page_index: page_num.saturating_sub(1) }));
+					}
+				} else if !link.uri.is_empty() && !link.uri.starts_with('#') {
+					return Ok(Some(LinkTarget::Uri(link.uri)));
 				}
 			}
 		}
@@ -156,13 +220,21 @@ pub fn start_rendering(
 
 	let mut stored_doc = None;
 	let mut invert = false;
+	let mut rotate = RotateDirection::Deg0;
 	let mut preserved_area = None;
 	let mut fit_or_fill = FitOrFill::Fit;
 
 	let mut need_rerender = VecDeque::new();
 
+	#[cfg(windows)]
+	let path = path.to_string_lossy();
+
 	'reload: loop {
-		let doc = match Document::open(path) {
+		// Need to do this weird borrow thing so that we convert `Cow<'_, str>` -> `&str` on windows
+		// and keep unix a `&Path` -> `&Path` 'cause there are different requirements within mupdf
+		// about file paths per-platform
+		#[cfg_attr(unix, expect(clippy::borrow_deref_ref))]
+		let doc = match Document::open(&*path) {
 			Err(e) => {
 				// if there's an error, tell the main loop
 				sender.send(Err(RenderError::Doc(e)))?;
@@ -296,17 +368,23 @@ pub fn start_rendering(
 							}
 							continue 'render_pages;
 						}
-						RenderNotif::QueryLinkAt { page: qpage, mupdf_x_px, mupdf_y_px, resp } => {
-							match query_link_at(&doc, qpage, mupdf_x_px, mupdf_y_px, area_w, area_h, fit_or_fill) {
-								Ok(t) => resp.send(Ok(t)),
-								Err(e) => {
-									let err_str = format!("Failed to query links: {e}");
-									resp.send(Err(err_str))
-								}
+						RenderNotif::Rotate => {
+							rotate = match rotate {
+								RotateDirection::Deg0 => RotateDirection::Deg90,
+								RotateDirection::Deg90 => RotateDirection::Deg180,
+								RotateDirection::Deg180 => RotateDirection::Deg270,
+								RotateDirection::Deg270 => RotateDirection::Deg0
+							};
+							for page in &mut rendered {
+								page.successful = false;
 							}
-							.unwrap_or_else(|e| {
-								panic!("Renderer failed to send link-query response: {e}")
-							});
+							continue 'render_pages;
+						}
+						RenderNotif::QueryLinkAt { page: qpage, mupdf_x_px, mupdf_y_px, mupdf_w_px, mupdf_h_px, resp } => {
+							let msg = query_link_at(&doc, qpage, mupdf_x_px, mupdf_y_px, mupdf_w_px, mupdf_h_px, area_w, area_h, fit_or_fill, rotate)
+								.map_err(|e| format!("Failed to query links: {e}"));
+							resp.send(msg)
+								.expect("Renderer failed to send link-query response");
 						}
 					}
 				}};
@@ -371,6 +449,7 @@ pub fn start_rendering(
 					black,
 					white,
 					fit_or_fill,
+					rotate,
 					(area_w, area_h)
 				) {
 					// If that fn returned Some, that means it needed to be re-rendered for some
@@ -525,6 +604,7 @@ fn render_single_page_to_ctx(
 	black: i32,
 	white: i32,
 	fit_or_fill: FitOrFill,
+	rotate: RotateDirection,
 	(area_w, area_h): (f32, f32)
 ) -> Result<RenderedContext, mupdf::error::Error> {
 	let result_rects = match prev_render.num_search_found {
@@ -535,7 +615,12 @@ fn render_single_page_to_ctx(
 
 	// then, get the size of the page
 	let bounds = page.bounds()?;
-	let page_dim = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+	let page_dim = match rotate {
+		RotateDirection::Deg0 | RotateDirection::Deg180 =>
+			(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0),
+		RotateDirection::Deg90 | RotateDirection::Deg270 =>
+			(bounds.y1 - bounds.y0, bounds.x1 - bounds.x0),
+	};
 
 	let scaled = scale_img_for_area(page_dim, (area_w, area_h), fit_or_fill);
 	let ScaledResult {
@@ -552,7 +637,13 @@ fn render_single_page_to_ctx(
 	}
 
 	let colorspace = Colorspace::device_rgb();
-	let matrix = Matrix::new_scale(scale_factor, scale_factor);
+	let mut matrix = Matrix::new_scale(scale_factor, scale_factor);
+	match rotate {
+		RotateDirection::Deg0 => matrix.rotate(0.0),
+		RotateDirection::Deg90 => matrix.rotate(90.0),
+		RotateDirection::Deg180 => matrix.rotate(180.0),
+		RotateDirection::Deg270 => matrix.rotate(270.0)
+	};
 
 	let mut pixmap = page.to_pixmap(&matrix, &colorspace, false, false)?;
 	if invert {

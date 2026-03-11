@@ -42,7 +42,7 @@ pub fn scale_img_for_area(
 
 	// and get the ratio that this page would have to be scaled by to fit perfectly within the
 	// area provided to us.
-	// we do this first by comparing the aspec ratio of the page with the aspect ratio of the
+	// we do this first by comparing the aspect ratio of the page with the aspect ratio of the
 	// area to fit it within. If the aspect ratio of the page is larger, then we need to scale
 	// the width of the page to fill perfectly within the height of the area. Otherwise, we
 	// scale the height to fit perfectly. The dimension that _is not_ scaled to fit perfectly

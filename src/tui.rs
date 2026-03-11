@@ -9,10 +9,7 @@ use crossterm::{
 	}
 };
 use kittage::display::DisplayLocation;
-use nix::{
-	sys::signal::{Signal::SIGSTOP, kill},
-	unistd::Pid
-};
+// nix is only used on unix for SIGSTOP support
 use ratatui::{
 	Frame,
 	layout::{Constraint, Flex, Layout, Position, Rect},
@@ -614,7 +611,7 @@ impl Tui {
 		row: u16,
 		full_layout: &RenderLayout,
 		font_size: FontSize
-	) -> Option<(usize, f32, f32)> {
+	) -> Option<(usize, f32, f32, f32, f32)> {
 		let img_area = full_layout.page_area;
 
 		// Use the pages_shown and unused_width computed during render to match exactly.
@@ -625,13 +622,16 @@ impl Tui {
 			return None;
 		}
 
-		// Collect the shown pages and their widths in the same order `render` would render
-		let mut page_infos: Vec<(usize, u16)> = self
+		// Collect the shown pages and their dimensions in the same order `render` would render
+		let mut page_infos: Vec<(usize, u16, u16)> = self
 			.rendered[self.page..]
 			.iter()
 			.take(pages_shown)
 			.enumerate()
-			.filter_map(|(idx, p)| p.img.as_ref().map(|img| (self.page + idx, img.w_h().0)))
+			.filter_map(|(idx, p)| p.img.as_ref().map(|img| {
+				let (w, h) = img.w_h();
+				(self.page + idx, w, h)
+			}))
 			.collect();
 
 		if self.page_constraints.r_to_l {
@@ -639,14 +639,19 @@ impl Tui {
 		}
 
 		let mut x = img_area.x + (unused_width / 2);
+		let total_height = page_infos.iter().map(|(_, _, h)| *h).max().unwrap_or(0);
+		let mut y = img_area.y;
+		if let Some(unused_height) = img_area.height.checked_sub(total_height) {
+			y += unused_height / 2;
+		}
 
 		// iterate through displayed pages and see if click falls into one
-		for (page_num, cell_w) in page_infos {
+		for (page_num, cell_w, cell_h) in page_infos {
 			let area = Rect {
 				x,
-				y: img_area.y,
+				y,
 				width: cell_w,
-				height: img_area.height,
+				height: cell_h,
 			};
 			if col >= area.x
 				&& col < area.x + area.width
@@ -658,7 +663,7 @@ impl Tui {
 				let local_row = row - area.y;
 				let mupdf_x = f32::from(local_col) * f32::from(font_size.0);
 				let mupdf_y = f32::from(local_row) * f32::from(font_size.1);
-				return Some((page_num, mupdf_x, mupdf_y));
+				return Some((page_num, mupdf_x, mupdf_y, f32::from(font_size.0), f32::from(font_size.1)));
 			}
 
 			x += cell_w;
@@ -863,10 +868,17 @@ impl Tui {
 								.unwrap();
 								disable_raw_mode().unwrap();
 
-								// This process will hang after the SIGSTOP call until we get
-								// foregrounded again by something else, at which point we need to
-								// re-setup everything so that it all gets drawn again.
-								kill(Pid::this(), SIGSTOP).unwrap();
+								#[cfg(unix)]
+								{
+									// This process will hang after the SIGSTOP call until we get
+									// foregrounded again by something else, at which point we need to
+									// re-setup everything so that it all gets drawn again.
+									nix::sys::signal::kill(
+										nix::unistd::Pid::this(),
+										nix::sys::signal::Signal::SIGSTOP
+									)
+									.unwrap();
+								}
 
 								enable_raw_mode().unwrap();
 								execute!(
@@ -898,6 +910,7 @@ impl Tui {
 							'G' if can_zoom => self.update_zoom(Zoom::pan_top),
 							'0' if can_zoom => self.update_zoom(Zoom::pan_left),
 							'$' if can_zoom => self.update_zoom(Zoom::pan_right),
+							'r' => Some(InputAction::Rotate),
 							_ => None
 						}
 					}
@@ -1046,7 +1059,7 @@ impl Tui {
 		})));
 	}
 
-	fn set_page(&mut self, page: usize) {
+	pub fn set_page(&mut self, page: usize) {
 		if page != self.page {
 			// mark that we need to re-render the images
 			self.last_render.rect = Rect::default();
@@ -1176,6 +1189,8 @@ H, J, K, L (when zoomed in):
     Pan direction around page
 0/$ (when on fill-screen):
     Scroll to left/right side of page
+r:
+    Rotate by 90 degrees
 ";
 
 pub enum InputAction {
@@ -1184,6 +1199,7 @@ pub enum InputAction {
 	Search(String),
 	QuitApp,
 	Invert,
+	Rotate,
 	Fullscreen,
 	SwitchRenderZoom(crate::FitOrFill),
 	/// Mouse left-click at terminal cell (column, row)

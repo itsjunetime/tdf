@@ -70,11 +70,18 @@ fn reset_term() {
 	);
 }
 
-#[tokio::main]
-async fn main() -> Result<(), WrappedErr> {
-	let result = inner_main().await;
-	reset_term();
-	result
+fn main() -> Result<(), WrappedErr> {
+	let rt = tokio::runtime::Builder::new_multi_thread()
+		.worker_threads(3)
+		.enable_time()
+		.build()
+		.unwrap();
+
+	rt.block_on(async move {
+		let result = inner_main().await;
+		reset_term();
+		result
+	})
 }
 
 async fn inner_main() -> Result<(), WrappedErr> {
@@ -381,6 +388,9 @@ async fn enter_redraw_loop(
 	mut main_area: tdf::tui::RenderLayout,
 	font_size: FontSize
 ) -> Result<(), Box<dyn Error>> {
+	let (link_tx, link_rx) = flume::unbounded();
+	let mut link_rx = link_rx.into_stream();
+
 	loop {
 		let mut needs_redraw = true;
 		let next_ev = ev_stream.next().fuse();
@@ -401,43 +411,28 @@ async fn enter_redraw_loop(
 						},
 						InputAction::Search(term) => to_renderer.send(RenderNotif::Search(term))?,
 						InputAction::Invert => to_renderer.send(RenderNotif::Invert)?,
+						InputAction::Rotate => to_renderer.send(RenderNotif::Rotate)?,
 						InputAction::Fullscreen => fullscreen = !fullscreen,
 						InputAction::SwitchRenderZoom(f_or_f) => {
 							to_renderer.send(RenderNotif::SwitchFitOrFill(f_or_f)).unwrap();
 						}
 						InputAction::Click { col, row } => {
-							if let Some((page_num, mupdf_x, mupdf_y)) = tui.map_click_to_page(col, row, &main_area, font_size) {
+							if let Some((page_num, mupdf_x, mupdf_y, mupdf_w, mupdf_h)) = tui.map_click_to_page(col, row, &main_area, font_size) {
+								let link_tx = link_tx.clone();
 								let (resp_tx, resp_rx) = flume::bounded(1);
 								to_renderer.send(RenderNotif::QueryLinkAt {
 									page: page_num,
 									mupdf_x_px: mupdf_x,
 									mupdf_y_px: mupdf_y,
+									mupdf_w_px: mupdf_w,
+									mupdf_h_px: mupdf_h,
 									resp: resp_tx
 								})?;
-								// await the renderer reply; the renderer now returns
-								// Result<Option<LinkTarget>, String> so we can display errors
-								match resp_rx.recv_async().await {
-									Ok(Ok(Some(LinkTarget::Uri(uri)))) => {
-										if let Err(e) = webbrowser::open(&uri) {
-											tui.set_msg(MessageSetting::Some(BottomMessage::Error(
-												format!("Failed to open uri {uri}: {e}")
-											)));
-										}
+								tokio::spawn(async move {
+									if let Ok(res) = resp_rx.recv_async().await {
+										let _ = link_tx.send_async(res).await;
 									}
-									Ok(Ok(Some(LinkTarget::GoTo { page_index }))) => {
-										to_renderer.send(RenderNotif::JumpToPage(page_index))?;
-										to_converter.send(ConverterMsg::GoToPage(page_index))?;
-									}
-									Ok(Ok(None)) => {},
-									Ok(Err(err_str)) => {
-										tui.set_msg(MessageSetting::Some(BottomMessage::Error(err_str)));
-									}
-									Err(e) => {
-										tui.set_msg(MessageSetting::Some(BottomMessage::Error(
-											format!("Failed to receive link response from renderer: {e}")
-										)));
-									}
-								}
+								});
 							}
 						}
 					}
@@ -470,6 +465,33 @@ async fn enter_redraw_loop(
 						}
 					},
 					Err(e) => tui.show_error(e),
+				}
+			},
+			Some(link_res) = link_rx.next() => {
+				match link_res {
+					Ok(Some(LinkTarget::Uri(uri))) => {
+						let mut clean_uri = uri.as_str();
+						if clean_uri.starts_with("file:") {
+							clean_uri = &clean_uri["file:".len()..];
+							if let Some((base, _)) = clean_uri.split_once('#') {
+								clean_uri = base;
+							}
+						}
+						if let Err(e) = open::that(clean_uri) {
+							tui.set_msg(MessageSetting::Some(BottomMessage::Error(
+								format!("Failed to open uri {clean_uri}: {e}")
+							)));
+						}
+					}
+					Ok(Some(LinkTarget::GoTo { page_index })) => {
+						tui.set_page(page_index);
+						to_renderer.send(RenderNotif::JumpToPage(page_index)).unwrap();
+						to_converter.send(ConverterMsg::GoToPage(page_index)).unwrap();
+					}
+					Ok(None) => {}
+					Err(err_str) => {
+						tui.set_msg(MessageSetting::Some(BottomMessage::Error(err_str)));
+					}
 				}
 			},
 		};

@@ -55,7 +55,7 @@ flexi_logger = "0.31"
 console-subscriber = { version = "0.5.0", optional = true }
 
 [patch.crates-io]
-pathfinder_simd = { git = "https://github.com/itsjunetime/pathfinder.git", branch = "fix_nightly_arm_simd" }
+pathfinder_simd = { git = "https://github.com/itsjunetime/pathfinder.git", rev = "814671e162a1829e074521446317b915311d3d4d" }
 
 [profile.production]
 inherits = "release"

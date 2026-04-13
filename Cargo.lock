@@ -2078,8 +2078,7 @@ dependencies = [
 [[package]]
 name = "pathfinder_simd"
 version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf9027960355bf3afff9841918474a81a5f972ac6d226d518060bba758b5ad57"
+source = "git+https://github.com/itsjunetime/pathfinder.git?branch=fix_nightly_arm_simd#814671e162a1829e074521446317b915311d3d4d"
 dependencies = [
  "rustc_version",
 ]

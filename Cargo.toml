@@ -53,6 +53,9 @@ flexi_logger = "0.31"
 # for tracing with tokio-console
 console-subscriber = { version = "0.5.0", optional = true }
 
+[patch.crates-io]
+pathfinder_simd = { git = "https://github.com/itsjunetime/pathfinder.git", branch = "fix_nightly_arm_simd" }
+
 [profile.production]
 inherits = "release"
 lto = "fat"

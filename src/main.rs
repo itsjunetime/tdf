@@ -1,7 +1,4 @@
-use core::{
-	error::Error,
-	num::{NonZeroU32, NonZeroUsize}
-};
+use core::{error::Error, num::NonZeroUsize};
 use std::{
 	borrow::Cow,
 	ffi::OsString,
@@ -16,8 +13,8 @@ use crossterm::{
 	event::EventStream,
 	execute,
 	terminal::{
-		EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-		enable_raw_mode, window_size
+		EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, WindowSize,
+		disable_raw_mode, enable_raw_mode, window_size
 	}
 };
 use debounce::EventDebouncer;
@@ -39,7 +36,8 @@ use tdf::{
 	PrerenderLimit,
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	kitty::{
-		DisplayErr, DisplayErrSource, KittyDisplay, display_kitty_images, do_shms_work, run_action
+		DisplayErr, DisplayErrSource, KittyDisplay, MaybeTmuxWriter, display_kitty_images,
+		do_shms_work, run_action
 	},
 	renderer::{self, MUPDF_BLACK, MUPDF_WHITE, RenderError, RenderInfo, RenderNotif},
 	tui::{BottomMessage, InputAction, MessageSetting, Tui}
@@ -250,22 +248,20 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	// We need to create `picker` on this thread because if we create it on the `renderer` thread,
 	// it messes up something with user input. Input never makes it to the crossterm thing
 	let picker = Picker::from_query_stdio()
-		.or_else(|e| match e {
-			ratatui_image::errors::Errors::NoFontSize if
-				window_size.width != 0
-				&& window_size.height != 0
-				&& window_size.columns != 0
-				&& window_size.rows != 0 =>
-			{
+		.or_else(|e| match (e, window_size) {
+			(
+				ratatui_image::errors::Errors::NoFontSize,
+				WindowSize { width: 1.., height: 1.., columns: 1.., rows: 1.. }
+			) => {
 				// the 'equivalent' that is suggested instead is not the same. We need to keep
 				// calling this.
 				#[expect(deprecated)]
 				Ok(Picker::from_fontsize((cell_width_px, cell_height_px)))
 			},
-			ratatui_image::errors::Errors::NoFontSize => Err(WrappedErr(
+			(ratatui_image::errors::Errors::NoFontSize, _) => Err(WrappedErr(
 				"Unable to detect your terminal's font size; this is an issue with your terminal emulator.\nPlease use a different terminal emulator or report this bug to tdf.".into()
 			)),
-			e => Err(WrappedErr(format!("Couldn't get the necessary information to set up images: {e}").into()))
+			(e, _) => Err(WrappedErr(format!("Couldn't get the necessary information to set up images: {e}").into()))
 		})?;
 
 	// then we want to spawn off the rendering task
@@ -325,12 +321,13 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	})?;
 
 	if is_kitty {
+		let mut writer = MaybeTmuxWriter::new(stdout().lock(), is_tmux);
 		run_action(
 			Action::Delete(DeleteConfig {
 				effect: ClearOrDelete::Delete,
-				which: WhichToDelete::IdRange(NonZeroU32::new(1).unwrap()..=NonZeroU32::MAX)
+				which: WhichToDelete::All
 			}),
-			is_tmux,
+			&mut writer,
 			&mut ev_stream
 		)
 		.await
@@ -352,8 +349,8 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let tui_rx = tui_rx.into_stream();
 	let from_converter = from_converter.into_stream();
 
-	enter_redraw_loop(
-		ev_stream,
+	let res = enter_redraw_loop(
+		&mut ev_stream,
 		to_renderer,
 		tui_rx,
 		to_converter,
@@ -373,16 +370,29 @@ async fn inner_main() -> Result<(), WrappedErr> {
 			)
 			.into()
 		)
-	})?;
+	});
 
+	if is_kitty {
+		let mut writer = MaybeTmuxWriter::new(stdout().lock(), is_tmux);
+		_ = run_action(
+			Action::Delete(DeleteConfig {
+				effect: ClearOrDelete::Delete,
+				which: WhichToDelete::All
+			}),
+			&mut writer,
+			&mut ev_stream
+		)
+		.await;
+	}
 	drop(maybe_logger);
-	Ok(())
+
+	res
 }
 
 // oh shut up clippy who cares
 #[expect(clippy::too_many_arguments)]
 async fn enter_redraw_loop(
-	mut ev_stream: EventStream,
+	ev_stream: &mut EventStream,
 	to_renderer: Sender<RenderNotif>,
 	mut tui_rx: RecvStream<'_, Result<RenderInfo, RenderError>>,
 	to_converter: Sender<ConverterMsg>,
@@ -466,7 +476,7 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area, font_size);
 			})?;
 
-			let maybe_err = display_kitty_images(to_display, is_tmux, &mut ev_stream).await;
+			let maybe_err = display_kitty_images(to_display, is_tmux, ev_stream).await;
 
 			if let Err(DisplayErr {
 				failed_pages,

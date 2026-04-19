@@ -701,156 +701,141 @@ impl Tui {
 		match ev {
 			Event::Key(key) => {
 				match key.code {
-					KeyCode::Char(c) => {
-						// TODO: refactor back to `if let` arm guards when those are stabilized
+					KeyCode::Char(c)
 						if let BottomMessage::Input(InputCommand::Search(ref mut term)) =
-							self.bottom_msg
-						{
-							term.push(c);
-							return Some(InputAction::Redraw);
-						}
-
-						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) =
-							self.bottom_msg
-						{
-							if c == 'g' && self.is_kitty {
-								self.update_zoom(Zoom::pan_bottom);
-								self.set_msg(MessageSetting::Pop);
-								return Some(InputAction::Redraw);
-							}
-
-							return c.to_digit(10).map(|input_num| {
-								*page = (*page * 10) + input_num as usize;
-								InputAction::Redraw
-							});
-						}
-
-						match c {
-							'l' => self.change_page(PageChange::Next, ChangeAmount::Single),
-							'j' => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
-							'h' => self.change_page(PageChange::Prev, ChangeAmount::Single),
-							'k' => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-							'q' => Some(InputAction::QuitApp),
-							'g' => {
-								self.set_msg(MessageSetting::Some(BottomMessage::Input(
-									InputCommand::GoToPage(0)
-								)));
-								Some(InputAction::Redraw)
-							}
-							'/' => {
-								self.set_msg(MessageSetting::Some(BottomMessage::Input(
-									InputCommand::Search(String::new())
-								)));
-								Some(InputAction::Redraw)
-							}
-							'i' => Some(InputAction::Invert),
-							'?' => {
-								self.showing_help_msg = true;
-								Some(InputAction::Redraw)
-							}
-							'f' => Some(InputAction::Fullscreen),
-							'n' if self.page < self.rendered.len() - 1 => {
-								// TODO: If we can't find one, then maybe like block until we've verified
-								// all the pages have been checked?
-								self.rendered[(self.page + 1)..]
-									.iter()
-									.enumerate()
-									.find_map(|(idx, p)| {
-										p.num_results
-											.is_some_and(|num| num > 0)
-											.then_some(self.page + 1 + idx)
-									})
-									.map(|next_page| {
-										jump_to_page(
-											&mut self.page,
-											&mut self.last_render.rect,
-											next_page
-										)
-									})
-							}
-							'N' if self.page > 0 => self.rendered[..(self.page)]
-								.iter()
-								.rev()
-								.enumerate()
-								.find_map(|(idx, p)| {
-									p.num_results
-										.is_some_and(|num| num > 0)
-										.then_some(self.page - (idx + 1))
-								})
-								.map(|prev_page| {
-									jump_to_page(
-										&mut self.page,
-										&mut self.last_render.rect,
-										prev_page
-									)
-								}),
-							'z' if key.modifiers.contains(KeyModifiers::CONTROL) => {
-								// [todo] better error handling here?
-
-								let mut backend = stdout();
-								execute!(
-									&mut backend,
-									LeaveAlternateScreen,
-									crossterm::cursor::Show,
-									crossterm::event::DisableMouseCapture
-								)
-								.unwrap();
-								disable_raw_mode().unwrap();
-
-								#[cfg(unix)]
-								{
-									// This process will hang after the SIGSTOP call until we get
-									// foregrounded again by something else, at which point we need to
-									// re-setup everything so that it all gets drawn again.
-									nix::sys::signal::kill(
-										nix::unistd::Pid::this(),
-										nix::sys::signal::Signal::SIGSTOP
-									)
-									.unwrap();
-								}
-
-								enable_raw_mode().unwrap();
-								execute!(
-									&mut backend,
-									EnterAlternateScreen,
-									crossterm::cursor::Hide,
-									crossterm::event::EnableMouseCapture
-								)
-								.unwrap();
-
-								self.last_render.rect = Rect::default();
-								Some(InputAction::Redraw)
-							}
-							'z' if self.is_kitty => {
-								let (zoom, f_or_f) = match self.zoom {
-									None => (Some(Zoom::default()), FitOrFill::Fill),
-									Some(_) => (None, FitOrFill::Fit)
-								};
-								self.zoom = zoom;
-								self.last_render.rect = Rect::default();
-								Some(InputAction::SwitchRenderZoom(f_or_f))
-							}
-							'o' if can_zoom => self.update_zoom(Zoom::step_in),
-							'O' if can_zoom => self.update_zoom(Zoom::step_out),
-							'L' if can_zoom => self.update_zoom(|z| z.pan(Direction::Right)),
-							'H' if can_zoom => self.update_zoom(|z| z.pan(Direction::Left)),
-							'J' if can_zoom => self.update_zoom(|z| z.pan(Direction::Down)),
-							'K' if can_zoom => self.update_zoom(|z| z.pan(Direction::Up)),
-							'G' if can_zoom => self.update_zoom(Zoom::pan_top),
-							'0' if can_zoom => self.update_zoom(Zoom::pan_left),
-							'$' if can_zoom => self.update_zoom(Zoom::pan_right),
-							'r' => Some(InputAction::Rotate),
-							_ => None
-						}
+							self.bottom_msg =>
+					{
+						term.push(c);
+						InputAction::Redraw.into()
 					}
-					KeyCode::Backspace => {
-						if let BottomMessage::Input(InputCommand::Search(ref mut term)) =
-							self.bottom_msg
-						{
-							term.pop();
-							return Some(InputAction::Redraw);
+					KeyCode::Char(c)
+						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) =
+							self.bottom_msg && matches!(c, 'g' if self.is_kitty) =>
+						c.to_digit(10).map(|input_num| {
+							*page = (*page * 10) + input_num as usize;
+							InputAction::Redraw
+						}),
+					KeyCode::Char(_)
+						if let BottomMessage::Input(InputCommand::GoToPage(_)) =
+							self.bottom_msg =>
+					{
+						self.set_msg(MessageSetting::Pop);
+						self.update_zoom(Zoom::pan_bottom)
+					}
+					KeyCode::Char(c) => match c {
+						'l' => self.change_page(PageChange::Next, ChangeAmount::Single),
+						'j' => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),
+						'h' => self.change_page(PageChange::Prev, ChangeAmount::Single),
+						'k' => self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
+						'q' => Some(InputAction::QuitApp),
+						'g' => {
+							self.set_msg(MessageSetting::Some(BottomMessage::Input(
+								InputCommand::GoToPage(0)
+							)));
+							Some(InputAction::Redraw)
 						}
-						None
+						'/' => {
+							self.set_msg(MessageSetting::Some(BottomMessage::Input(
+								InputCommand::Search(String::new())
+							)));
+							Some(InputAction::Redraw)
+						}
+						'i' => Some(InputAction::Invert),
+						'?' => {
+							self.showing_help_msg = true;
+							Some(InputAction::Redraw)
+						}
+						'f' => Some(InputAction::Fullscreen),
+						// TODO: If we can't find one, then maybe like block until we've verified
+						// all the pages have been checked?
+						'n' if self.page < self.rendered.len() - 1 => self.rendered
+							[(self.page + 1)..]
+							.iter()
+							.enumerate()
+							.find_map(|(idx, p)| {
+								p.num_results
+									.is_some_and(|num| num > 0)
+									.then_some(self.page + 1 + idx)
+							})
+							.map(|next_page| {
+								jump_to_page(&mut self.page, &mut self.last_render.rect, next_page)
+							}),
+						'N' if self.page > 0 => self.rendered[..(self.page)]
+							.iter()
+							.rev()
+							.enumerate()
+							.find_map(|(idx, p)| {
+								p.num_results
+									.is_some_and(|num| num > 0)
+									.then_some(self.page - (idx + 1))
+							})
+							.map(|prev_page| {
+								jump_to_page(&mut self.page, &mut self.last_render.rect, prev_page)
+							}),
+						'z' if key.modifiers.contains(KeyModifiers::CONTROL) => {
+							// [todo] better error handling here?
+
+							let mut backend = stdout();
+							execute!(
+								&mut backend,
+								LeaveAlternateScreen,
+								crossterm::cursor::Show,
+								crossterm::event::DisableMouseCapture
+							)
+							.unwrap();
+							disable_raw_mode().unwrap();
+
+							#[cfg(unix)]
+							{
+								// This process will hang after the SIGSTOP call until we get
+								// foregrounded again by something else, at which point we need to
+								// re-setup everything so that it all gets drawn again.
+								nix::sys::signal::kill(
+									nix::unistd::Pid::this(),
+									nix::sys::signal::Signal::SIGSTOP
+								)
+								.unwrap();
+							}
+
+							enable_raw_mode().unwrap();
+							execute!(
+								&mut backend,
+								EnterAlternateScreen,
+								crossterm::cursor::Hide,
+								crossterm::event::EnableMouseCapture
+							)
+							.unwrap();
+
+							self.last_render.rect = Rect::default();
+							Some(InputAction::Redraw)
+						}
+						'z' if self.is_kitty => {
+							let (zoom, f_or_f) = match self.zoom {
+								None => (Some(Zoom::default()), FitOrFill::Fill),
+								Some(_) => (None, FitOrFill::Fit)
+							};
+							self.zoom = zoom;
+							self.last_render.rect = Rect::default();
+							Some(InputAction::SwitchRenderZoom(f_or_f))
+						}
+						'o' if can_zoom => self.update_zoom(Zoom::step_in),
+						'O' if can_zoom => self.update_zoom(Zoom::step_out),
+						'L' if can_zoom => self.update_zoom(|z| z.pan(Direction::Right)),
+						'H' if can_zoom => self.update_zoom(|z| z.pan(Direction::Left)),
+						'J' if can_zoom => self.update_zoom(|z| z.pan(Direction::Down)),
+						'K' if can_zoom => self.update_zoom(|z| z.pan(Direction::Up)),
+						'G' if can_zoom => self.update_zoom(Zoom::pan_top),
+						'0' if can_zoom => self.update_zoom(Zoom::pan_left),
+						'$' if can_zoom => self.update_zoom(Zoom::pan_right),
+						'r' => Some(InputAction::Rotate),
+						_ => None
+					},
+					KeyCode::Backspace
+						if let BottomMessage::Input(InputCommand::Search(ref mut term)) =
+							self.bottom_msg =>
+					{
+						term.pop();
+						InputAction::Redraw.into()
 					}
 					KeyCode::Right => self.change_page(PageChange::Next, ChangeAmount::Single),
 					KeyCode::Down | KeyCode::PageDown =>

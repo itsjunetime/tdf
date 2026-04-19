@@ -11,7 +11,7 @@ license = "AGPL-3.0-only"
 keywords = ["pdf", "tui", "cli", "terminal"]
 categories = ["command-line-utilities", "text-processing", "visualization"]
 default-run = "tdf"
-rust-version = "1.86"
+rust-version = "1.95"
 
 [[bin]]
 name = "tdf"
@@ -41,10 +41,11 @@ nix = { version = "0.31.0", features = ["signal"] }
 mupdf = { git = "https://github.com/messense/mupdf-rs.git", rev = "d7441b9998c92135e329559c0aa71d9dc92cf4de", default-features = false, features = ["svg", "system-fonts", "img"] }
 rayon = { version = "1", default-features = false }
 # kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
-kittage = { version = "0.3.4", features = ["crossterm-tokio", "image-crate", "log"] }
+kittage = { version = "0.4.0", features = ["crossterm-tokio", "image-crate", "log"] }
 memmap2 = "0"
 csscolorparser = { version = "0.8.0", default-features = false }
 debounce = "0.2.2"
+smallvec = "1"
 
 # logging
 log = "0.4.27"

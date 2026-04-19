@@ -1,6 +1,6 @@
 use std::{
 	io::Cursor,
-	num::{NonZeroUsize, NonZeroU32},
+	num::{NonZeroU32, NonZeroUsize},
 	time::{SystemTime, UNIX_EPOCH}
 };
 

@@ -128,8 +128,11 @@ pub enum DisplayErrSource<'es> {
 impl Display for DisplayErrSource<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Self::KittageReturnedNoId => write!(f, "Kittage returned no ID when we asked it to display an image. This is a bug in kittage, please report it."),
-			Self::Transmission(t) => write!(f, "Error with talking to the terminal: {t}"),
+			Self::KittageReturnedNoId => write!(
+				f,
+				"Kittage returned no ID when we asked it to display an image. This is a bug in kittage, please report it."
+			),
+			Self::Transmission(t) => write!(f, "Error with talking to the terminal: {t}")
 		}
 	}
 }
@@ -210,7 +213,7 @@ pub async fn display_kitty_images<'es>(
 					Ok(Some(img_id)) => {
 						*img = MaybeTransferred::Transferred(img_id);
 						Ok(())
-					},
+					}
 					Ok(None) => Err((page_num, DisplayErrSource::KittageReturnedNoId)),
 					Err(e) => Err((page_num, DisplayErrSource::Transmission(e)))
 				}

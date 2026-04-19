@@ -1,13 +1,13 @@
 use std::{
 	io::Cursor,
-	num::NonZeroUsize,
+	num::{NonZeroUsize, NonZeroU32},
 	time::{SystemTime, UNIX_EPOCH}
 };
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt as _;
 use image::{DynamicImage, codecs::pnm::PnmDecoder};
-use kittage::{NumberOrId, action::NONZERO_ONE};
+use kittage::NumberOrId;
 use ratatui::layout::Rect;
 use ratatui_image::{
 	Resize,
@@ -164,7 +164,7 @@ pub async fn run_conversion_loop(
 				};
 
 				// if ur pdf has 4 billion pages then you deserve to suffer
-				img.num_or_id = NumberOrId::Id(NONZERO_ONE.saturating_add(page_num as u32));
+				img.num_or_id = NumberOrId::Id(NonZeroU32::MIN.saturating_add(page_num as u32));
 
 				ConvertedImage::Kitty {
 					img: MaybeTransferred::NotYet(img),

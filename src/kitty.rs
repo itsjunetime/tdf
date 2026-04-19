@@ -1,3 +1,4 @@
+use core::fmt::Display;
 use std::{io::Write, num::NonZeroU32};
 
 use crossterm::{
@@ -17,6 +18,7 @@ use kittage::{
 	medium::Medium
 };
 use ratatui::layout::Position;
+use smallvec::SmallVec;
 
 use crate::converter::MaybeTransferred;
 
@@ -63,7 +65,7 @@ impl<W: Write> Write for DbgWriter<W> {
 pub async fn run_action<'es>(
 	action: Action<'_, '_>,
 	ev_stream: &'es mut EventStream
-) -> Result<ImageId, TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>> {
+) -> Result<Option<ImageId>, TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>> {
 	let writer = DbgWriter {
 		w: std::io::stdout().lock(),
 		#[cfg(debug_assertions)]
@@ -99,17 +101,43 @@ pub async fn do_shms_work(ev_stream: &mut EventStream) -> bool {
 	res.is_ok()
 }
 
+type ESTransErr<'es> = TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>;
+
+pub struct DisplayErr<'es> {
+	pub failed_pages: SmallVec<[usize; 2]>,
+	pub user_facing_err: &'static str,
+	pub source: DisplayErrSource<'es>
+}
+
+impl<'es> DisplayErr<'es> {
+	fn empty(user_facing_err: &'static str, source: ESTransErr<'es>) -> Self {
+		Self {
+			failed_pages: SmallVec::new(),
+			user_facing_err,
+			source: DisplayErrSource::Transmission(source)
+		}
+	}
+}
+
+#[derive(Debug)]
+pub enum DisplayErrSource<'es> {
+	KittageReturnedNoId,
+	Transmission(ESTransErr<'es>)
+}
+
+impl Display for DisplayErrSource<'_> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::KittageReturnedNoId => write!(f, "Kittage returned no ID when we asked it to display an image. This is a bug in kittage, please report it."),
+			Self::Transmission(t) => write!(f, "Error with talking to the terminal: {t}"),
+		}
+	}
+}
+
 pub async fn display_kitty_images<'es>(
 	display: KittyDisplay<'_>,
 	ev_stream: &'es mut EventStream
-) -> Result<
-	(),
-	(
-		Vec<usize>,
-		&'static str,
-		TransmitError<<&'es mut EventStream as AsyncInputReader>::Error>
-	)
-> {
+) -> Result<(), DisplayErr<'es>> {
 	let images = match display {
 		KittyDisplay::NoChange => return Ok(()),
 		KittyDisplay::DisplayImages(_) | KittyDisplay::ClearImages => {
@@ -121,7 +149,7 @@ pub async fn display_kitty_images<'es>(
 				ev_stream
 			)
 			.await
-			.map_err(|e| (vec![], "Couldn't clear previous images", e))?;
+			.map_err(|e| DisplayErr::empty("Couldn't clear previous images", e))?;
 
 			let KittyDisplay::DisplayImages(images) = display else {
 				return Ok(());
@@ -131,7 +159,7 @@ pub async fn display_kitty_images<'es>(
 		}
 	};
 
-	let mut err = None;
+	let mut err = Ok::<(), (SmallVec<[usize; 2]>, DisplayErrSource<'es>)>(());
 	for KittyReadyToDisplay {
 		img,
 		page_num,
@@ -179,11 +207,12 @@ pub async fn display_kitty_images<'es>(
 				.await;
 
 				match res {
-					Ok(img_id) => {
+					Ok(Some(img_id)) => {
 						*img = MaybeTransferred::Transferred(img_id);
 						Ok(())
-					}
-					Err(e) => Err((page_num, e))
+					},
+					Ok(None) => Err((page_num, DisplayErrSource::KittageReturnedNoId)),
+					Err(e) => Err((page_num, DisplayErrSource::Transmission(e)))
 				}
 			}
 			MaybeTransferred::Transferred(image_id) => run_action(
@@ -195,20 +224,24 @@ pub async fn display_kitty_images<'es>(
 				ev_stream
 			)
 			.await
-			.map(|_| ())
-			.map_err(|e| (page_num, e))
+			// don't need the return id 'cause we already know it
+			.map(|_: Option<ImageId>| ())
+			.map_err(|e| (page_num, DisplayErrSource::Transmission(e)))
 		};
 
 		log::debug!("this_err is {this_err:#?}");
 
 		if let Err((id, e)) = this_err {
-			let e = err.get_or_insert_with(|| (vec![], e));
-			e.0.push(id);
+			match err.as_mut() {
+				Ok(()) => err = Err((SmallVec::from([id].as_slice()), e)),
+				Err((v, _)) => v.push(id)
+			}
 		}
 	}
 
-	match err {
-		Some((replace, e)) => Err((replace, "Couldn't transfer image to the terminal", e)),
-		None => Ok(())
-	}
+	err.map_err(|(failed_pages, source)| DisplayErr {
+		failed_pages,
+		user_facing_err: "Couldn't transfer image to the terminal",
+		source
+	})
 }

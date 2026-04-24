@@ -248,7 +248,7 @@ pub async fn display_kitty_images<'es>(
 		}),
 		Ok(()) => run_action(
 			Action::Delete(DeleteConfig {
-				effect: ClearOrDelete::Delete,
+				effect: ClearOrDelete::Clear,
 				which: WhichToDelete::PlacementsWithZIndex(z_idxes_to_remove)
 			}),
 			ev_stream

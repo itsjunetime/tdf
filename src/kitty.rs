@@ -140,11 +140,12 @@ impl Display for DisplayErrSource<'_> {
 pub async fn display_kitty_images<'es>(
 	display: KittyDisplay<'_>,
 	ev_stream: &'es mut EventStream,
-	last_z_index: &mut i32,
+	last_z_index: &mut i32
 ) -> Result<(), DisplayErr<'es>> {
 	let images = match display {
 		KittyDisplay::NoChange => return Ok(()),
-		KittyDisplay::ClearImages => return run_action(
+		KittyDisplay::ClearImages =>
+			return run_action(
 				Action::Delete(DeleteConfig {
 					effect: ClearOrDelete::Clear,
 					which: WhichToDelete::All
@@ -154,7 +155,7 @@ pub async fn display_kitty_images<'es>(
 			.await
 			.map_err(|e| DisplayErr::empty("Couldn't clear previous images", e))
 			.map(|_: Option<ImageId>| ()),
-		KittyDisplay::DisplayImages(imgs) => imgs,
+		KittyDisplay::DisplayImages(imgs) => imgs
 	};
 
 	let new_z_index = last_z_index.wrapping_add_unsigned(1);
@@ -208,10 +209,11 @@ pub async fn display_kitty_images<'es>(
 				)
 				.await
 				.map_err(DisplayErrSource::Transmission)
-				.and_then(|img_id| img_id
-					.map(|id| *img = MaybeTransferred::Transferred(id))
-					.ok_or(DisplayErrSource::KittageReturnedNoId)
-				)
+				.and_then(|img_id| {
+					img_id
+						.map(|id| *img = MaybeTransferred::Transferred(id))
+						.ok_or(DisplayErrSource::KittageReturnedNoId)
+				})
 			}
 			MaybeTransferred::Transferred(image_id) => run_action(
 				Action::Display {

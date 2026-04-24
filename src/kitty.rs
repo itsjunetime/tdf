@@ -139,12 +139,13 @@ impl Display for DisplayErrSource<'_> {
 
 pub async fn display_kitty_images<'es>(
 	display: KittyDisplay<'_>,
-	ev_stream: &'es mut EventStream
+	ev_stream: &'es mut EventStream,
+	last_z_index: &mut i32
 ) -> Result<(), DisplayErr<'es>> {
 	let images = match display {
 		KittyDisplay::NoChange => return Ok(()),
-		KittyDisplay::DisplayImages(_) | KittyDisplay::ClearImages => {
-			run_action(
+		KittyDisplay::ClearImages =>
+			return run_action(
 				Action::Delete(DeleteConfig {
 					effect: ClearOrDelete::Clear,
 					which: WhichToDelete::All
@@ -152,24 +153,23 @@ pub async fn display_kitty_images<'es>(
 				ev_stream
 			)
 			.await
-			.map_err(|e| DisplayErr::empty("Couldn't clear previous images", e))?;
-
-			let KittyDisplay::DisplayImages(images) = display else {
-				return Ok(());
-			};
-
-			images
-		}
+			.map_err(|e| DisplayErr::empty("Couldn't clear previous images", e))
+			.map(|_: Option<ImageId>| ()),
+		KittyDisplay::DisplayImages(imgs) => imgs
 	};
+
+	let new_z_index = last_z_index.wrapping_add_unsigned(1);
 
 	let mut err = Ok::<(), (SmallVec<[usize; 2]>, DisplayErrSource<'es>)>(());
 	for KittyReadyToDisplay {
 		img,
 		page_num,
 		pos,
-		display_loc
+		mut display_loc
 	} in images
 	{
+		display_loc.z_index = new_z_index;
+
 		let config = DisplayConfig {
 			location: display_loc,
 			cursor_movement: CursorMovementPolicy::DontMove,
@@ -199,7 +199,7 @@ pub async fn display_kitty_images<'es>(
 				};
 				std::mem::swap(image, &mut fake_image);
 
-				let res = run_action(
+				run_action(
 					Action::TransmitAndDisplay {
 						image: fake_image,
 						config,
@@ -207,16 +207,13 @@ pub async fn display_kitty_images<'es>(
 					},
 					ev_stream
 				)
-				.await;
-
-				match res {
-					Ok(Some(img_id)) => {
-						*img = MaybeTransferred::Transferred(img_id);
-						Ok(())
-					}
-					Ok(None) => Err((page_num, DisplayErrSource::KittageReturnedNoId)),
-					Err(e) => Err((page_num, DisplayErrSource::Transmission(e)))
-				}
+				.await
+				.map_err(DisplayErrSource::Transmission)
+				.and_then(|img_id| {
+					img_id
+						.map(|id| *img = MaybeTransferred::Transferred(id))
+						.ok_or(DisplayErrSource::KittageReturnedNoId)
+				})
 			}
 			MaybeTransferred::Transferred(image_id) => run_action(
 				Action::Display {
@@ -229,22 +226,37 @@ pub async fn display_kitty_images<'es>(
 			.await
 			// don't need the return id 'cause we already know it
 			.map(|_: Option<ImageId>| ())
-			.map_err(|e| (page_num, DisplayErrSource::Transmission(e)))
+			.map_err(DisplayErrSource::Transmission)
 		};
 
 		log::debug!("this_err is {this_err:#?}");
 
-		if let Err((id, e)) = this_err {
+		if let Err(e) = this_err {
 			match err.as_mut() {
-				Ok(()) => err = Err((SmallVec::from([id].as_slice()), e)),
-				Err((v, _)) => v.push(id)
+				Ok(()) => err = Err((SmallVec::from([page_num].as_slice()), e)),
+				Err((v, _)) => v.push(page_num)
 			}
 		}
 	}
 
-	err.map_err(|(failed_pages, source)| DisplayErr {
-		failed_pages,
-		user_facing_err: "Couldn't transfer image to the terminal",
-		source
-	})
+	let z_idxes_to_remove = *last_z_index;
+	*last_z_index = new_z_index;
+
+	match err {
+		Err((failed_pages, source)) => Err(DisplayErr {
+			failed_pages,
+			user_facing_err: "Couldn't transfer image to the terminal",
+			source
+		}),
+		Ok(()) => run_action(
+			Action::Delete(DeleteConfig {
+				effect: ClearOrDelete::Clear,
+				which: WhichToDelete::PlacementsWithZIndex(z_idxes_to_remove)
+			}),
+			ev_stream
+		)
+		.await
+		.map_err(|e| DisplayErr::empty("Couldn't clear previously-sent images", e))
+		.map(|_| ())
+	}
 }

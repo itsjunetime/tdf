@@ -390,6 +390,8 @@ async fn enter_redraw_loop(
 	mut main_area: tdf::tui::RenderLayout,
 	font_size: FontSize
 ) -> Result<(), Box<dyn Error>> {
+	let mut kitty_z_idx = i32::MIN;
+
 	loop {
 		let mut needs_redraw = true;
 		let next_ev = ev_stream.next().fuse();
@@ -462,7 +464,8 @@ async fn enter_redraw_loop(
 				to_display = tui.render(f, &main_area, font_size);
 			})?;
 
-			let maybe_err = display_kitty_images(to_display, &mut ev_stream).await;
+			let maybe_err =
+				display_kitty_images(to_display, &mut ev_stream, &mut kitty_z_idx).await;
 
 			if let Err(DisplayErr {
 				failed_pages,

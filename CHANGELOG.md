@@ -2,6 +2,7 @@
 
 - Added windows support! (thank you to [@jarjk](https://github.com/jarjk) for helping out!)
 - Added keybindings (`0`/`$`) to scroll to left or right side of zoomed-in image ([#131](https://github.com/itsjunetime/tdf/pull/131), thank you [@IshDeshpa](https://github.com/IshDeshpa)!)
+- Fixed issue with images clearing/flashing after displaying a certain number on kitty
 - (Internal) decreased runtime footprint of tokio runtime
 
 # v0.5.0

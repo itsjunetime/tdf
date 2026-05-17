@@ -300,6 +300,7 @@ pub async fn display_kitty_images<'es>(
 				effect: ClearOrDelete::Clear,
 				which: WhichToDelete::PlacementsWithZIndex(z_idxes_to_remove)
 			}),
+			&mut writer,
 			ev_stream
 		)
 		.await

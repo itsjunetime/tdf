@@ -72,7 +72,7 @@ struct PageConstraints {
 	r_to_l: bool
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy)]
 struct Zoom {
 	// just how much 'zoom' you have. 0 means it fills the screen (instead of fits), such
 	// that one axis is fully on-screen
@@ -86,7 +86,7 @@ struct Zoom {
 }
 impl Zoom {
 	/// Returns the zoom factor, where 1 is the default and means fill-screen
-	fn factor(&self) -> f32 {
+	fn factor(self) -> f32 {
 		// TODO: Make these configurable once we have a good way to set options after startup
 		const ZOOM_RATE: f32 = 1.1;
 		const ZOOM_RATE_GRANULAR: f32 = 1.05;
@@ -274,17 +274,41 @@ impl Tui {
 					/ 2;
 			};
 
-			// TODO: Detect max zoom-out in zoom levels
 			if img_page_w_ratio < img_page_h_ratio {
-				// vertical scroll / tall image. zooming out means decreasing the width of the page area
+				// To detect if we're already at fit-screen, we perform a first
+				// pass on `img_area` that emulates the last call to
+				// `render_zoomed` by subtracting from the `zoom`'s level. This
+				// holds because the `img_area` that gets passed is always the
+				// same.
+				let mut first_pass_area = img_area;
+				let mut first_pass_zoom = *zoom;
+				if first_pass_zoom.level.is_negative() {
+					first_pass_zoom.step_in();
+				}
+				let first_pass_zoom_factor = first_pass_zoom.factor();
+				shrink_move_page(
+					&mut first_pass_area.width,
+					&mut first_pass_area.x,
+					first_pass_zoom_factor.max(1.0 / img_page_h_ratio)
+				);
+				log::debug!("first_pass_area: {first_pass_area:#?}");
+				// vertical scroll / tall image. zooming out means decreasing
+				// the width of the page area
 				shrink_move_page(
 					&mut img_area.width,
 					&mut img_area.x,
 					// disallow zooming out past fit-screen
 					zoom_factor.max(1.0 / img_page_h_ratio)
 				);
+				log::debug!("img_area: {img_area:#?}");
+				// The moment the image area is left unmodified, we've hit
+				// fit-screen and the zoom level ought be normalized.
+				if first_pass_area == img_area {
+					zoom.step_in();
+				}
 			} else {
-				// horizontal scroll / wide image. zooming out means decreasing the width of the page area
+				// horizontal scroll / wide image. zooming out means decreasing
+				// the height of the page area
 				shrink_move_page(
 					&mut img_area.height,
 					&mut img_area.y,

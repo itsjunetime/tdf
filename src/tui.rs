@@ -262,7 +262,7 @@ impl Tui {
 			let img_page_w_ratio = img_section_w / initial_page_w;
 			let img_page_h_ratio = img_section_h / initial_page_h;
 
-			let shrink_move_page = |dim: &mut u16, pos: &mut u16, axis_zoom_factor: f32| {
+			fn shrink_move_page(dim: &mut u16, pos: &mut u16, axis_zoom_factor: f32) {
 				let old_dim = *dim;
 				// The axis zoom factor tells us what portion of the axis
 				// we need to show.
@@ -272,50 +272,56 @@ impl Tui {
 					.checked_sub(*dim)
 					.expect("zooming out should shrink the image")
 					/ 2;
-			};
+			}
 
-			if img_page_w_ratio < img_page_h_ratio {
+			fn shrink_move_two_pass(
+				zoom: &mut Zoom,
+				dim: &mut u16,
+				pos: &mut u16,
+				zoom_factor: f32,
+				axis_zoom_factor: f32
+			) {
 				// To detect if we're already at fit-screen, we perform a first
 				// pass on `img_area` that emulates the last call to
 				// `render_zoomed` by subtracting from the `zoom`'s level. This
 				// holds because the `img_area` that gets passed is always the
 				// same.
-				let mut first_pass_area = img_area;
+				let mut first_pass_dim = *dim;
+				let mut first_pass_pos = *pos;
 				let mut first_pass_zoom = *zoom;
+
 				if first_pass_zoom.level.is_negative() {
 					first_pass_zoom.step_in();
 				}
 				let first_pass_zoom_factor = first_pass_zoom.factor();
 				shrink_move_page(
-					&mut first_pass_area.width,
-					&mut first_pass_area.x,
-					first_pass_zoom_factor.max(1.0 / img_page_h_ratio)
+					&mut first_pass_dim,
+					&mut first_pass_pos,
+					first_pass_zoom_factor.max(1.0 / axis_zoom_factor)
 				);
-				log::debug!("first_pass_area: {first_pass_area:#?}");
+
+				log::debug!("first_pass_dim: {first_pass_dim}, first_pass_pos: {first_pass_pos}");
 				// vertical scroll / tall image. zooming out means decreasing
 				// the width of the page area
-				shrink_move_page(
-					&mut img_area.width,
-					&mut img_area.x,
-					// disallow zooming out past fit-screen
-					zoom_factor.max(1.0 / img_page_h_ratio)
-				);
-				log::debug!("img_area: {img_area:#?}");
+				// use `max` to disallow zooming out past fit-screen
+				shrink_move_page(dim, pos, zoom_factor.max(1.0 / axis_zoom_factor));
+
+				log::debug!("new dim: {dim}, new pos: {pos}");
 				// The moment the image area is left unmodified, we've hit
 				// fit-screen and the zoom level ought be normalized.
-				if first_pass_area == img_area {
+				if first_pass_dim == *dim && first_pass_pos == *pos {
 					zoom.step_in();
 				}
+			}
+
+			let (dim, pos, axis_zoom_factor) = if img_page_w_ratio < img_page_h_ratio {
+				(&mut img_area.width, &mut img_area.x, img_page_h_ratio)
 			} else {
 				// horizontal scroll / wide image. zooming out means decreasing
 				// the height of the page area
-				shrink_move_page(
-					&mut img_area.height,
-					&mut img_area.y,
-					// disallow zooming out past fit-screen
-					zoom_factor.max(1.0 / img_page_w_ratio)
-				);
-			}
+				(&mut img_area.height, &mut img_area.y, img_page_w_ratio)
+			};
+			shrink_move_two_pass(zoom, dim, pos, zoom_factor, axis_zoom_factor);
 		}
 		log::debug!("after adjustment, page area is {img_area:#?}");
 

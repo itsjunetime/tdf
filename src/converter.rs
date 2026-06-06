@@ -17,7 +17,7 @@ use ratatui_image::{
 use rayon::iter::ParallelIterator as _;
 
 use crate::{
-	renderer::{PageInfo, RenderError, fill_default},
+	renderer::{HighlightRect, Link, PageInfo, RenderError, fill_default},
 	skip::InterleavedAroundWithMax
 };
 
@@ -57,13 +57,35 @@ impl ConvertedImage {
 pub struct ConvertedPage {
 	pub page: ConvertedImage,
 	pub num: usize,
-	pub num_results: usize
+	pub num_results: usize,
+	pub links: Vec<Link>
 }
 
 pub enum ConverterMsg {
 	NumPages(usize),
 	GoToPage(usize),
 	AddImg(PageInfo)
+}
+
+struct RectangleFilter;
+impl RectangleFilter {
+	const BW: u32 = 2;
+
+	#[inline]
+	fn filled(x: u32, y: u32, quad: &HighlightRect) -> bool {
+		x > quad.ul_x && x < quad.lr_x && y > quad.ul_y && y < quad.lr_y
+	}
+
+	#[inline]
+	fn outline(x: u32, y: u32, quad: &HighlightRect) -> bool {
+		let within_x = quad.ul_x <= x && x <= quad.lr_x;
+		let within_y = quad.ul_y <= y && y <= quad.lr_y;
+
+		(y < quad.ul_y && quad.ul_y - RectangleFilter::BW < y) && within_x 		  // top
+			|| (y > quad.lr_y && quad.lr_y + RectangleFilter::BW > y) && within_x // bottom
+			|| (x < quad.ul_x && quad.ul_x - RectangleFilter::BW < x) && within_y // left
+			|| (x > quad.lr_x && quad.lr_x + RectangleFilter::BW > x) && within_y // right
+	}
 }
 
 pub async fn run_conversion_loop(
@@ -128,10 +150,21 @@ pub async fn run_conversion_loop(
 		for quad in &*page_info.result_rects {
 			dyn_img
 				.par_enumerate_pixels_mut()
-				.filter(|(x, y, _)| {
-					*x > quad.ul_x && *x < quad.lr_x && *y > quad.ul_y && *y < quad.lr_y
-				})
+				.filter(|(x, y, _)| RectangleFilter::filled(*x, *y, quad))
 				.for_each(|(_, _, px)| px.0[2] = px.0[2].saturating_sub(u8::MAX / 2));
+		}
+
+		for Link { rects, is_selected, .. } in &*page_info.links {
+			let filter = match is_selected {
+				true => RectangleFilter::filled,
+				false => RectangleFilter::outline
+			};
+			for rect in rects {
+				dyn_img
+					.par_enumerate_pixels_mut()
+					.filter(|(x, y, _)| filter(*x, *y, rect))
+					.for_each(|(_, _, px)| px.0[0] = px.0[0].saturating_sub(u8::MAX / 2));
+			}
 		}
 
 		let img_area = Rect {
@@ -195,7 +228,8 @@ pub async fn run_conversion_loop(
 		Ok(Some(ConvertedPage {
 			page: txt_img,
 			num: page_info.page_num,
-			num_results: page_info.result_rects.len()
+			num_results: page_info.result_rects.len(),
+			links: page_info.links.clone()
 		}))
 	}
 

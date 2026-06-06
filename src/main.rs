@@ -417,6 +417,7 @@ async fn enter_redraw_loop(
 						InputAction::SwitchRenderZoom(f_or_f) => {
 							to_renderer.send(RenderNotif::SwitchFitOrFill(f_or_f)).unwrap();
 						}
+						InputAction::HighlightLink(maybe_link) => to_renderer.send(RenderNotif::HighlightLink(maybe_link))?
 					}
 				}
 			},
@@ -440,8 +441,8 @@ async fn enter_redraw_loop(
 			}
 			Some(img_res) = from_converter.next() => {
 				match img_res {
-					Ok(ConvertedPage { page, num, num_results }) => {
-						tui.page_ready(page, num, num_results);
+					Ok(ConvertedPage { page, num, num_results, links }) => {
+						tui.page_ready(page, num, num_results, links);
 						if num == tui.page {
 							needs_redraw = true;
 						}

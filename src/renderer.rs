@@ -21,7 +21,8 @@ pub enum RenderNotif {
 	SwitchFitOrFill(FitOrFill),
 	Reload,
 	Invert,
-	Rotate
+	Rotate,
+	HighlightLink(Option<usize>)
 }
 
 #[derive(Debug)]
@@ -50,7 +51,8 @@ pub enum RotateDirection {
 pub struct PageInfo {
 	pub img_data: ImageData,
 	pub page_num: usize,
-	pub result_rects: Vec<HighlightRect>
+	pub result_rects: Vec<HighlightRect>,
+	pub links: Vec<Link>,
 }
 
 #[derive(Clone)]
@@ -63,7 +65,22 @@ pub struct ImageData {
 #[derive(Default)]
 struct PrevRender {
 	successful: bool,
-	num_search_found: Option<usize>
+	num_search_found: Option<usize>,
+	highlighted_link: Option<usize>
+}
+
+#[derive(Clone, Debug)]
+pub enum LinkDestination {
+	URI(String),
+	Page(u32),
+}
+
+#[derive(Clone, Debug)]
+pub struct Link {
+	// Rectangles to highlight, same link can have multiple rectangles if split across lines
+	pub rects: Vec<HighlightRect>,
+	pub is_selected: bool,
+	pub dest: LinkDestination
 }
 
 pub const MUPDF_BLACK: i32 = 0;
@@ -178,6 +195,9 @@ pub fn start_rendering(
 		fill_default::<PrevRender>(&mut rendered, n_pages.get());
 		let mut start_point = 0;
 
+		// todo there must be a better way to do this
+		let mut link_highlight_changed = false;
+
 		// This is kinda a weird way of doing this, but if we get a notification that the area
 		// changed, we want to start re-rending all of the pages, but we don't want to reload the
 		// document. If there was a mechanism to say 'start this for-loop over' then I would do
@@ -223,6 +243,8 @@ pub fn start_rendering(
 								continue 'render_pages;
 							},
 						RenderNotif::JumpToPage(page) => {
+							// clear old highlight
+							rendered[start_point].highlighted_link = None;
 							start_point = page;
 							continue 'render_pages;
 						}
@@ -267,6 +289,11 @@ pub fn start_rendering(
 							}
 							continue 'render_pages;
 						}
+						RenderNotif::HighlightLink(maybe_link) => {
+							link_highlight_changed = true;
+							rendered[start_point].highlighted_link = maybe_link;
+							continue 'render_pages;
+						}
 					}
 				}};
 			}
@@ -307,9 +334,13 @@ pub fn start_rendering(
 				// 1. It failed to render last time (we want to retry)
 				// 2. The `contained_term` is set to Unknown, meaning that we need to at least
 				//    check if it contains the current term to see if it needs a re-render
-				if rendered.successful && rendered.num_search_found.is_some() {
+				if rendered.successful && rendered.num_search_found.is_some()
+				&& !(page_num == start_point && link_highlight_changed){
 					continue;
 				}
+
+				// consume this since it is now stale state
+				link_highlight_changed = false;
 
 				// We know this is in range 'cause we're iterating over it but we still just want
 				// to be safe
@@ -357,7 +388,8 @@ pub fn start_rendering(
 								cell_h: (ctx.surface_h / f32::from(col_h)) as u16
 							},
 							page_num,
-							result_rects: ctx.result_rects
+							result_rects: ctx.result_rects,
+							links: ctx.links,
 						})))?;
 					}
 					// And if we got an error, then obviously we need to propagate that
@@ -473,7 +505,8 @@ struct RenderedContext {
 	pixmap: Pixmap,
 	surface_w: f32,
 	surface_h: f32,
-	result_rects: Vec<HighlightRect>
+	result_rects: Vec<HighlightRect>,
+	links: Vec<Link>
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -555,11 +588,16 @@ fn render_single_page_to_ctx(
 		})
 		.collect::<Vec<_>>();
 
+	log::debug!("prev_highlight: {:?}", prev_render.highlighted_link);
+	let links = extract_page_links(page, scale_factor, prev_render.highlighted_link)?;
+	log::debug!("links: {:?}", links);
+
 	Ok(RenderedContext {
 		pixmap,
 		surface_w,
 		surface_h,
-		result_rects
+		result_rects,
+		links
 	})
 }
 
@@ -602,6 +640,60 @@ fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::
 		})?;
 		Ok(count)
 	})
+}
+
+fn extract_page_links(
+	page: &Page,
+	scale_factor: f32,
+	highlighted_link: Option<usize>,
+) -> Result<Vec<Link>, mupdf::error::Error> {
+	let link_groups = page.links()?
+		.fold(Vec::<Vec<mupdf::Link>>::new(), |mut acc, link| {
+			if let Some(group) = acc.last_mut() {
+				let prev_link = group.last().unwrap();
+				// todo fix
+				// the commented out lines ignores page margins
+				// but something like this is needed in case there are two separate links with the same uri
+				// across lines
+				let is_same = prev_link.uri == link.uri
+					&& prev_link.dest == link.dest
+					&& prev_link.bounds.y1 == link.bounds.y0;
+				// && prev_link.bounds.x1 == bounds.x1
+				// && link.bounds.x0 == bounds.x0;
+				if is_same {
+					group.push(link);
+				} else {
+					acc.push(vec![link]);
+				}
+			} else {
+				acc.push(vec![link]);
+			}
+			acc
+		});
+
+	Ok(link_groups
+		.iter()
+		.enumerate()
+		.map(|(c, link_group)| Link {
+			rects: link_group
+				.iter()
+				.map(|link| {
+					let rect = link.bounds;
+					HighlightRect {
+						ul_x: (rect.x0 * scale_factor) as u32,
+						ul_y: (rect.y0 * scale_factor) as u32,
+						lr_x: (rect.x1 * scale_factor) as u32,
+						lr_y: (rect.y1 * scale_factor) as u32,
+					}
+				})
+				.collect(),
+			dest: link_group[0].dest.map_or(
+				LinkDestination::URI(link_group[0].uri.clone()),
+				|d| LinkDestination::Page(d.loc.page_number)
+			),
+			is_selected: highlighted_link.is_some_and(|idx| idx == c),
+		})
+		.collect())
 }
 
 struct PopOnNext<'a> {

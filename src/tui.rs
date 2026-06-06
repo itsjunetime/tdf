@@ -1,5 +1,4 @@
-use std::{borrow::Cow, io::stdout, num::NonZeroUsize};
-
+use std::{io::stdout, num::NonZeroUsize};
 use crossterm::{
 	event::{Event, KeyCode, KeyModifiers, MouseEventKind},
 	execute,
@@ -24,7 +23,7 @@ use crate::{
 	FitOrFill,
 	converter::{ConvertedImage, MaybeTransferred},
 	kitty::{KittyDisplay, KittyReadyToDisplay},
-	renderer::{RenderError, fill_default},
+	renderer::{Link, LinkDestination, RenderError, fill_default},
 	skip::Skip
 };
 
@@ -174,7 +173,9 @@ pub struct RenderedInfo {
 	// we haven't checked this page yet
 	// Also this isn't the most efficient representation of this value, but it's accurate, so like
 	// whatever I guess
-	num_results: Option<usize>
+	num_results: Option<usize>,
+	// Links on the page
+	links: Vec<Link>
 }
 
 #[derive(PartialEq)]
@@ -597,7 +598,13 @@ impl Tui {
 		self.page = self.page.min(n_pages - 1);
 	}
 
-	pub fn page_ready(&mut self, img: ConvertedImage, page_num: usize, num_results: usize) {
+	pub fn page_ready(
+		&mut self,
+		img: ConvertedImage,
+		page_num: usize,
+		num_results: usize,
+		links: Vec<Link>
+	) {
 		// If this new image woulda fit within the available space on the last render AND it's
 		// within the range where it might've been rendered with the last shown pages, then reset
 		// the last rect marker so that all images are forced to redraw on next render and this one
@@ -619,7 +626,8 @@ impl Tui {
 		// number of pages, so the vec will already be cleared
 		self.rendered[page_num] = RenderedInfo {
 			img: Some(img),
-			num_results: Some(num_results)
+			num_results: Some(num_results),
+			links
 		};
 	}
 
@@ -678,6 +686,9 @@ impl Tui {
 		} else {
 			String::new()
 		};
+
+		let has_links = rendered.get(page_num).is_some_and(|r| !r.links.is_empty());
+
 		let bottom_layout = Layout::horizontal([
 			Constraint::Fill(1),
 			Constraint::Length(rendered_str.len() as u16)
@@ -687,35 +698,58 @@ impl Tui {
 		let rendered_span = Span::styled(&rendered_str, Style::new().fg(Color::Cyan));
 		frame.render_widget(rendered_span, bottom_layout[1]);
 
-		let (msg_str, color): (Cow<'_, str>, _) = match bottom_msg {
-			BottomMessage::Help => ("?: Show help page".into(), Color::Blue),
-			BottomMessage::Error(e) => (e.as_str().into(), Color::Red),
-			BottomMessage::Input(input_state) => (
-				match input_state {
+		// Handle different bottom messages and render with appropriate colors
+		match bottom_msg {
+			BottomMessage::Help => {
+				// Create spans with different colors for help message and links info
+				let mut spans = vec![Span::styled(
+					"?: Show help page",
+					Style::new().fg(Color::Blue)
+				)];
+				if has_links {
+					spans.push(Span::styled(" | ", Style::new().fg(Color::DarkGray)));
+					spans.push(Span::styled(
+						match rendered[page_num].links.iter().find(|l| l.is_selected) {
+							None => format!("{} links", rendered[page_num].links.len()),
+							Some(l) => match &l.dest {
+								LinkDestination::URI(uri) => format!("URI: {uri}"),
+								LinkDestination::Page(num) => format!("To page {num}"),
+							}
+						},
+						Style::new().fg(Color::Yellow)
+					));
+				}
+				let help_line = ratatui::text::Line::from(spans);
+				frame.render_widget(Paragraph::new(help_line), bottom_layout[0]);
+			}
+			BottomMessage::Error(e) => {
+				let span = Span::styled(e.as_str(), Style::new().fg(Color::Red));
+				frame.render_widget(span, bottom_layout[0]);
+			}
+			BottomMessage::Input(input_state) => {
+				let msg_str = match input_state {
 					InputCommand::GoToPage(page) => format!("Go to: {page}"),
 					InputCommand::Search(s) => format!("Search: {s}")
-				}
-				.into(),
-				Color::Blue
-			),
+				};
+				let span = Span::styled(msg_str, Style::new().fg(Color::Blue));
+				frame.render_widget(span, bottom_layout[0]);
+			}
 			BottomMessage::SearchResults(term) => {
 				let num_found = rendered.iter().filter_map(|r| r.num_results).sum::<usize>();
 				let num_searched =
 					rendered.iter().filter(|r| r.num_results.is_some()).count() * 100;
-				(
-					format!(
-						"Results for '{term}': {num_found} (searched: {}%)",
-						num_searched / rendered.len()
-					)
-					.into(),
-					Color::Blue
-				)
+				let msg_str = format!(
+					"Results for '{term}': {num_found} (searched: {}%)",
+					num_searched / rendered.len()
+				);
+				let span = Span::styled(msg_str, Style::new().fg(Color::Blue));
+				frame.render_widget(span, bottom_layout[0]);
 			}
-			BottomMessage::Reloaded => ("Document was reloaded!".into(), Color::Blue)
-		};
-
-		let span = Span::styled(msg_str, Style::new().fg(color));
-		frame.render_widget(span, bottom_layout[0]);
+			BottomMessage::Reloaded => {
+				let span = Span::styled("Document was reloaded!", Style::new().fg(Color::Blue));
+				frame.render_widget(span, bottom_layout[0]);
+			}
+		}
 	}
 
 	pub fn handle_event(&mut self, ev: &Event) -> Option<InputAction> {
@@ -727,6 +761,8 @@ impl Tui {
 		}
 
 		let can_zoom = self.is_kitty && self.zoom.is_some();
+		let current_page_links = &self.rendered.get(self.page)?.links;
+		let highlighted_link = current_page_links.iter().position(|l| l.is_selected);
 
 		match ev {
 			Event::Key(key) => {
@@ -858,6 +894,15 @@ impl Tui {
 						'0' if can_zoom => self.update_zoom(Zoom::pan_left),
 						'$' if can_zoom => self.update_zoom(Zoom::pan_right),
 						'r' => Some(InputAction::Rotate),
+						'c' => highlighted_link.inspect(|&l| {
+							let link = &current_page_links[l];
+							// Copy to clipboard using copypasta
+							use copypasta::{ClipboardContext, ClipboardProvider};
+							if let LinkDestination::URI(ref uri) = link.dest
+								&& let Ok(mut ctx) = ClipboardContext::new() {
+								let _ = ctx.set_contents(uri.clone());
+							}
+						}).and(None),
 						_ => None
 					},
 					KeyCode::Backspace
@@ -873,8 +918,13 @@ impl Tui {
 					KeyCode::Left => self.change_page(PageChange::Prev, ChangeAmount::Single),
 					KeyCode::Up | KeyCode::PageUp =>
 						self.change_page(PageChange::Prev, ChangeAmount::WholeScreen),
-					KeyCode::Esc => match (self.showing_help_msg, &self.bottom_msg) {
-						(false, BottomMessage::Help) => Some(InputAction::QuitApp),
+					KeyCode::Esc => match (
+						self.showing_help_msg,
+						highlighted_link,
+						&self.bottom_msg
+					) {
+						(false, None, BottomMessage::Help) => Some(InputAction::QuitApp),
+						(false, Some(_), _) => Some(InputAction::HighlightLink(None)),
 						_ => {
 							// When we hit escape, we just want to pop off the current message and
 							// show the underlying one.
@@ -885,9 +935,26 @@ impl Tui {
 					KeyCode::Enter => {
 						let mut default = BottomMessage::default();
 						std::mem::swap(&mut self.bottom_msg, &mut default);
-						let BottomMessage::Input(ref cmd) = default else {
-							std::mem::swap(&mut self.bottom_msg, &mut default);
-							return None;
+						// I've tried to hook LinkDestination::Page into cmd so that the logic of GoToPage below can be reused
+						// But there is probably a better way to do this, maybe wrap it into a function
+						let cmd: &InputCommand = match default {
+							BottomMessage::Input(ref cmd) => cmd,
+							_ => {
+								std::mem::swap(&mut self.bottom_msg, &mut default);
+								match highlighted_link {
+									Some(l) => {
+										let link = &current_page_links[l];
+										match &link.dest {
+											LinkDestination::Page(page) => &InputCommand::GoToPage(*page as usize),
+											LinkDestination::URI(uri) => {
+												let _ = open::that(uri);
+												return None;
+											}
+										}
+									},
+									None => return None
+								}
+							}
 						};
 
 						match cmd {
@@ -935,6 +1002,15 @@ impl Tui {
 								// the highlighting
 								Some(InputAction::Search(term))
 							}
+						}
+					},
+					key @ (KeyCode::Tab | KeyCode::BackTab) => {
+						let n_links = current_page_links.len();
+						match (highlighted_link, key) {
+							(None, _) => Some(InputAction::HighlightLink(Some(0))), // No link is highlighted yet, highlight the first one
+							(Some(l), KeyCode::Tab) => Some(InputAction::HighlightLink(Some((l + 1) % n_links))),
+							(Some(l), KeyCode::BackTab) => Some(InputAction::HighlightLink(Some((l + n_links - 1) % n_links))),
+							_ => unreachable!() // key can't be anything else
 						}
 					}
 					_ => None
@@ -1138,7 +1214,8 @@ pub enum InputAction {
 	Invert,
 	Rotate,
 	Fullscreen,
-	SwitchRenderZoom(crate::FitOrFill)
+	SwitchRenderZoom(crate::FitOrFill),
+	HighlightLink(Option<usize>) // None => remove highlight
 }
 
 #[derive(Copy, Clone)]

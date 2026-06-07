@@ -136,7 +136,7 @@ pub async fn run_conversion_loop(
 
 		let img_size = Size {
 			width: page_info.img_data.cell_w,
-			height: page_info.img_data.cell_h,
+			height: page_info.img_data.cell_h
 		};
 
 		let dyn_img = DynamicImage::ImageRgb8(dyn_img);

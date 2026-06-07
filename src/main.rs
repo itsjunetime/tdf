@@ -260,7 +260,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 				// the 'equivalent' that is suggested instead is not the same. We need to keep
 				// calling this.
 				#[expect(deprecated)]
-				Ok(Picker::from_fontsize((cell_width_px, cell_height_px)))
+				Ok(Picker::from_fontsize(FontSize { width: cell_width_px, height: cell_height_px }))
 			},
 			ratatui_image::errors::Errors::NoFontSize => Err(WrappedErr(
 				"Unable to detect your terminal's font size; this is an issue with your terminal emulator.\nPlease use a different terminal emulator or report this bug to tdf.".into()
@@ -315,7 +315,7 @@ async fn inner_main() -> Result<(), WrappedErr> {
 	let mut term = Terminal::new(backend).map_err(|e| {
 		WrappedErr(format!("Couldn't set up crossterm's terminal backend: {e}").into())
 	})?;
-	term.skip_diff(true);
+	// term.skip_diff(true);
 
 	enable_raw_mode().map_err(|e| {
 		WrappedErr(

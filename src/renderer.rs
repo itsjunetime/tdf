@@ -1,6 +1,10 @@
-use std::{collections::VecDeque, num::NonZeroUsize, path::Path, thread::sleep, time::Duration};
+use std::{
+	collections::VecDeque, fs::File, io::BufReader, num::NonZeroUsize, path::Path, thread::sleep,
+	time::Duration
+};
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
+use hayro::hayro_syntax::Pdf;
 use mupdf::{
 	Colorspace, Document, Matrix, Page, Pixmap, Quad, TextPageFlags, text_page::SearchHitResponse
 };
@@ -27,7 +31,8 @@ pub enum RenderNotif {
 #[derive(Debug)]
 pub enum RenderError {
 	Notify(notify::Error),
-	Doc(mupdf::error::Error),
+	Opening(std::io::Error),
+	Doc(hayro::hayro_syntax::LoadPdfError),
 	Converting(String)
 }
 
@@ -117,11 +122,17 @@ pub fn start_rendering(
 	let path = path.to_string_lossy();
 
 	'reload: loop {
-		// Need to do this weird borrow thing so that we convert `Cow<'_, str>` -> `&str` on windows
-		// and keep unix a `&Path` -> `&Path` 'cause there are different requirements within mupdf
-		// about file paths per-platform
-		#[cfg_attr(unix, expect(clippy::borrow_deref_ref))]
-		let doc = match Document::open(&*path) {
+		// i'm not a pdf_file
+		// TODO: remove the comment above
+		let pdf_data = match std::fs::read(path) {
+			Err(e) => {
+				sender.send(Err(RenderError::Opening(e)))?;
+				continue;
+			}
+			Ok(f) => f
+		};
+
+		let pdf = match Pdf::new(pdf_data) {
 			Err(e) => {
 				// if there's an error, tell the main loop
 				sender.send(Err(RenderError::Doc(e)))?;
@@ -151,23 +162,9 @@ pub fn start_rendering(
 			}
 		};
 
-		let n_pages = match doc.page_count() {
-			Ok(n) => match NonZeroUsize::new(n as usize) {
-				Some(n) => n,
-				None => {
-					sleep(Duration::from_secs(1));
-					continue 'reload;
-				}
-			},
-			Err(e) => {
-				sender.send(Err(RenderError::Doc(e)))?;
-				// just basic backoff i think
-				sleep(Duration::from_secs(1));
-				continue 'reload;
-			}
-		};
+		let n_pages = pdf.pages().len();
 
-		sender.send(Ok(RenderInfo::NumPages(n_pages.get())))?;
+		sender.send(Ok(RenderInfo::NumPages(n_pages)))?;
 
 		// We're using this vec to indicate which page numbers have already been rendered, to
 		// support people jumping to specific pages and having quick rendering results. We
@@ -175,7 +172,7 @@ pub fn start_rendering(
 		// doing basically nothing, but if we get a notification that something has been jumped to,
 		// then we can split at that page and render at both sides of it
 		let mut rendered = Vec::new();
-		fill_default::<PrevRender>(&mut rendered, n_pages.get());
+		fill_default::<PrevRender>(&mut rendered, n_pages);
 		let mut start_point = 0;
 
 		// This is kinda a weird way of doing this, but if we get a notification that the area

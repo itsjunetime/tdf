@@ -2837,6 +2837,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 name = "tdf-viewer"
 version = "0.5.0"
 dependencies = [
+ "color",
  "console-subscriber",
  "cpuprofiler",
  "criterion",

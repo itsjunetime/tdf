@@ -991,8 +991,11 @@ impl Tui {
 	pub fn show_error(&mut self, err: RenderError) {
 		self.set_msg(MessageSetting::Some(BottomMessage::Error(match err {
 			RenderError::Notify(e) => format!("Auto-reload failed: {e}"),
-			RenderError::Doc(e) => format!("Couldn't process document: {e}"),
-			RenderError::Converting(e) => format!("Couldn't convert page after rendering: {e}")
+			RenderError::Doc(e) => format!("Couldn't process document: {e:?}"),
+			RenderError::Converting(e) => format!("Couldn't convert page after rendering: {e}"),
+			RenderError::Opening(e) => format!("Couldn't open the document: {e}"),
+			RenderError::UnknownPageNum(num) =>
+				format!("Encountered out-of-bounds page number {num} when rendering"),
 		})));
 	}
 

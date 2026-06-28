@@ -739,19 +739,19 @@ impl Tui {
 						InputAction::Redraw.into()
 					}
 					KeyCode::Char(c)
-						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) =
-							self.bottom_msg && matches!(c, 'g' if self.is_kitty) =>
-						c.to_digit(10).map(|input_num| {
-							*page = (*page * 10) + input_num as usize;
-							InputAction::Redraw
-						}),
-					KeyCode::Char(_)
 						if let BottomMessage::Input(InputCommand::GoToPage(_)) =
-							self.bottom_msg =>
+							self.bottom_msg && matches!(c, 'g' if self.is_kitty) =>
 					{
 						self.set_msg(MessageSetting::Pop);
 						self.update_zoom(Zoom::pan_bottom)
 					}
+					KeyCode::Char(c)
+						if let BottomMessage::Input(InputCommand::GoToPage(ref mut page)) =
+							self.bottom_msg =>
+						c.to_digit(10).map(|input_num| {
+							*page = (*page * 10) + input_num as usize;
+							InputAction::Redraw
+						}),
 					KeyCode::Char(c) => match c {
 						'l' => self.change_page(PageChange::Next, ChangeAmount::Single),
 						'j' => self.change_page(PageChange::Next, ChangeAmount::WholeScreen),

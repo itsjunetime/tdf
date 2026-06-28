@@ -72,7 +72,7 @@ pub async fn run_conversion_loop(
 	picker: Picker,
 	prerender: usize,
 	shms_work: bool
-) -> Result<(), SendError<Result<ConvertedPage, RenderError>>> {
+) -> Result<(), Box<SendError<Result<ConvertedPage, RenderError>>>> {
 	let mut images = vec![];
 	let mut page: usize = 0;
 	let pid = std::process::id();

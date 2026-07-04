@@ -6,7 +6,7 @@ use std::{
 
 use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt as _;
-use image::{DynamicImage, codecs::pnm::PnmDecoder};
+use image::{DynamicImage, RgbaImage, codecs::pnm::PnmDecoder};
 use kittage::NumberOrId;
 use ratatui::layout::Rect;
 use ratatui_image::{
@@ -112,18 +112,23 @@ pub async fn run_conversion_loop(
 			return Ok(None);
 		};
 
-		let decoder = PnmDecoder::new(Cursor::new(&page_info.img_data.pixels)).map_err(|e| {
-			RenderError::Converting(format!(
-				"The image data provided from mupdf was not in pnm format ({e}); don't know how to convert"
-			))
-		})?;
+		// let decoder = RgbaImage::new(page_info.img_dataCursor::new(&page_info.img_data.pixels)).map_err(|e| {
+		// 	RenderError::Converting(format!(
+		// 		"The image data provided from `hayro` was not in Rgba8 format ({e}); don't know how to convert"
+		// 	))
+		// })?;
+
+		let rgba_image = RgbaImage::from_vec(
+			page_info.img_data.width_px as u32,
+			page_info.img_data.height_px as u32,
+			page_info.img_data.pixels
+		)
+		.expect("Buffer is big enough, we created it!");
 
 		// The image we get should always already be `ImageRgb8`, so this `into` shouldn't do any
 		// conversions or anything, but just in case some underlying detail of mupdf or image
 		// changes, we do the `into` instead of just `match + unreachable!()` to avoid panicking
-		let mut dyn_img = DynamicImage::from_decoder(decoder)
-			.map_err(|e| RenderError::Converting(format!("Can't load image: {e}")))?
-			.into_rgb8();
+		let mut dyn_img = DynamicImage::ImageRgba8(rgba_image).into_rgb8();
 
 		for quad in &*page_info.result_rects {
 			dyn_img

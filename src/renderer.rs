@@ -1,9 +1,11 @@
-use std::{collections::VecDeque, num::NonZeroUsize, path::Path, thread::sleep, time::Duration};
-
-use flume::{Receiver, SendError, Sender, TryRecvError};
-use mupdf::{
-	Colorspace, Document, Matrix, Page, Pixmap, Quad, TextPageFlags, text_page::SearchHitResponse
+use std::{
+	collections::VecDeque, fs::File, io::BufReader, num::NonZeroUsize, path::Path, thread::sleep,
+	time::Duration
 };
+
+use color::PremulRgba8;
+use flume::{Receiver, SendError, Sender, TryRecvError};
+use hayro::{hayro_interpret, hayro_syntax::Pdf, vello_cpu::Pixmap};
 use ratatui::layout::Rect;
 
 use crate::{
@@ -27,7 +29,9 @@ pub enum RenderNotif {
 #[derive(Debug)]
 pub enum RenderError {
 	Notify(notify::Error),
-	Doc(mupdf::error::Error),
+	Opening(std::io::Error),
+	Doc(hayro::hayro_syntax::LoadPdfError),
+	UnknownPageNum(usize),
 	Converting(String)
 }
 
@@ -57,7 +61,9 @@ pub struct PageInfo {
 pub struct ImageData {
 	pub pixels: Vec<u8>,
 	pub cell_w: u16,
-	pub cell_h: u16
+	pub cell_h: u16,
+	pub height_px: u16,
+	pub width_px: u16
 }
 
 #[derive(Default)]
@@ -105,7 +111,6 @@ pub fn start_rendering(
 	// And although the font size could theoretically change, we aren't accounting for that right
 	// now, so we just use the values passed in.
 
-	let mut stored_doc = None;
 	let mut invert = false;
 	let mut rotate = RotateDirection::Deg0;
 	let mut preserved_area = None;
@@ -117,55 +122,43 @@ pub fn start_rendering(
 	let path = path.to_string_lossy();
 
 	'reload: loop {
-		// Need to do this weird borrow thing so that we convert `Cow<'_, str>` -> `&str` on windows
-		// and keep unix a `&Path` -> `&Path` 'cause there are different requirements within mupdf
-		// about file paths per-platform
-		#[cfg_attr(unix, expect(clippy::borrow_deref_ref))]
-		let doc = match Document::open(&*path) {
+		// i'm not a pdf_file
+		// TODO: remove the comment above
+		let pdf_data = match std::fs::read(path) {
+			Err(e) => {
+				sender.send(Err(RenderError::Opening(e)))?;
+				continue;
+			}
+			Ok(f) => f
+		};
+
+		let pdf = match Pdf::new(pdf_data) {
 			Err(e) => {
 				// if there's an error, tell the main loop
 				sender.send(Err(RenderError::Doc(e)))?;
 
-				match stored_doc {
-					Some(ref d) => d,
-					None => {
-						// then wait for a reload notif (since what probably happened is that the file was
-						// temporarily removed to facilitate a save or something like that)
-						while let Ok(msg) = receiver.recv() {
-							// and once that comes, just try to reload again
-							if matches!(msg, RenderNotif::Reload) {
-								continue 'reload;
-							}
-						}
-						// if that while let Ok ever fails and we exit out of that loop, the main thread is
-						// done, so we're fine to just return
-						return Ok(());
+				// then wait for a reload notif (since what probably happened is that the file was
+				// temporarily removed to facilitate a save or something like that)
+				while let Ok(msg) = receiver.recv() {
+					// and once that comes, just try to reload again
+					if matches!(msg, RenderNotif::Reload) {
+						continue 'reload;
 					}
 				}
+				// if that while let Ok ever fails and we exit out of that loop, the main thread is
+				// done, so we're fine to just return
+				return Ok(());
 			}
 			Ok(d) => {
-				if stored_doc.is_some() {
-					sender.send(Ok(RenderInfo::Reloaded))?;
-				}
-				&*stored_doc.insert(d)
+				// if stored_doc.is_some() {
+				// 	sender.send(Ok(RenderInfo::Reloaded))?;
+				// }
+				d
 			}
 		};
 
-		let n_pages = match doc.page_count() {
-			Ok(n) => match NonZeroUsize::new(n as usize) {
-				Some(n) => n,
-				None => {
-					sleep(Duration::from_secs(1));
-					continue 'reload;
-				}
-			},
-			Err(e) => {
-				sender.send(Err(RenderError::Doc(e)))?;
-				// just basic backoff i think
-				sleep(Duration::from_secs(1));
-				continue 'reload;
-			}
-		};
+		let n_pages =
+			NonZeroUsize::new(pdf.pages().len()).expect("PDF always has non-zero amount of pages");
 
 		sender.send(Ok(RenderInfo::NumPages(n_pages.get())))?;
 
@@ -313,15 +306,45 @@ pub fn start_rendering(
 
 				// We know this is in range 'cause we're iterating over it but we still just want
 				// to be safe
-				let page = match doc.load_page(page_num as i32) {
-					Err(e) => {
-						sender.send(Err(RenderError::Doc(e)))?;
-						continue;
-					}
-					Ok(p) => p
+				let Some(page) = pdf.pages().get(page_num) else {
+					sender.send(Err(RenderError::UnknownPageNum(page_num)))?;
+					continue;
 				};
 
 				// render the page
+
+				// FIXME: these should be reused between iterations
+				let hayro_cache = hayro::RenderCache::default();
+				let hayro_interpreter_settings = hayro_interpret::InterpreterSettings::default();
+				let hayro_render_settings = hayro::RenderSettings::default(); // FIXME: should be configurable!
+
+				let pixmap = hayro::render(
+					page,
+					&hayro_cache,
+					&hayro_interpreter_settings,
+					&hayro_render_settings
+				);
+				let w = pixmap.width();
+				let h = pixmap.height();
+				log::debug!("got pixmap for page {page_num} with WxH {w}x{h}");
+
+				sender.send(Ok(RenderInfo::Page(PageInfo {
+					img_data: ImageData {
+						// FIXME: can we avoid taking the
+						// slice and constructing Vec, just
+						// steal the existing bufer instead?
+						pixels: pixmap.data_as_u8_slice().to_vec(),
+						// FIXME: do we really need these floating point ops?
+						cell_w: (f32::from(w) / f32::from(col_w)) as u16,
+						cell_h: (f32::from(h) / f32::from(col_h)) as u16,
+						width_px: w,
+						height_px: h
+					},
+					page_num,
+					result_rects: Vec::new() // FIXME: do this!
+				})))?;
+
+				#[cfg(false)]
 				match render_single_page_to_ctx(
 					&page,
 					search_term.as_deref(),
@@ -344,8 +367,6 @@ pub fn start_rendering(
 							sender.send(Err(RenderError::Doc(e)))?;
 							continue;
 						}
-
-						log::debug!("got pixmap for page {page_num} with WxH {w}x{h}");
 
 						rendered.num_search_found = Some(ctx.result_rects.len());
 						rendered.successful = true;
@@ -376,6 +397,7 @@ pub fn start_rendering(
 
 			// Now, if we have a search term, we want to look through the rest of the document past
 			// what we've just rendered (and looked at the search results of)
+			#[cfg(false)]
 			if let Some(ref term) = search_term {
 				let mut search_start = start_point;
 				loop {
@@ -476,6 +498,7 @@ struct RenderedContext {
 	result_rects: Vec<HighlightRect>
 }
 
+#[cfg(false)]
 #[expect(clippy::too_many_arguments)]
 fn render_single_page_to_ctx(
 	page: &Page,
@@ -571,6 +594,7 @@ pub struct HighlightRect {
 	pub lr_y: u32
 }
 
+#[cfg(false)]
 #[inline]
 fn search_page(
 	page: &Page,
@@ -592,6 +616,7 @@ fn search_page(
 		.map(Option::unwrap_or_default)
 }
 
+#[cfg(false)]
 #[inline]
 fn count_search_results(page: &Page, search_term: &str) -> Result<usize, mupdf::error::Error> {
 	page.to_text_page(TextPageFlags::empty()).and_then(|page| {

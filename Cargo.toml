@@ -38,7 +38,9 @@ flume = { version = "0.12.0", default-features = false, features = ["async"] }
 xflags = "0.4.0-pre.2"
 mimalloc = "0.1.43"
 nix = { version = "0.31.0", features = ["signal"] }
-mupdf = { git = "https://github.com/messense/mupdf-rs.git", rev = "d7441b9998c92135e329559c0aa71d9dc92cf4de", default-features = false, features = ["svg", "system-fonts", "img"] }
+# mupdf = { git = "https://github.com/messense/mupdf-rs.git", rev = "d7441b9998c92135e329559c0aa71d9dc92cf4de", default-features = false, features = ["svg", "system-fonts", "img"] }
+hayro = { version = "0.7", default-features = false }
+color = "0.3"
 rayon = { version = "1", default-features = false }
 # kittage = { path = "../kittage/", features = ["crossterm-tokio", "image-crate", "log"] }
 kittage = { version = "0.4.0", features = ["crossterm-tokio", "image-crate", "log"] }
@@ -64,8 +66,8 @@ lto = "fat"
 [features]
 default = []
 tracing = ["tokio/tracing", "dep:console-subscriber"]
-epub = ["mupdf/epub"]
-cbz = ["mupdf/cbz"]
+# epub = ["mupdf/epub"]
+# cbz = ["mupdf/cbz"]
 
 [dev-dependencies]
 criterion = { version = "0.8.0", features = ["async_tokio"] }

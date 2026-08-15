@@ -636,12 +636,13 @@ fn osc_response_buf_to_color(response_buf: [u8; 25]) -> Option<i32> {
 		let mut color = 0;
 
 		for byte in ascii_hex_bytes {
-			color = (color << 4) + (match byte {
-				b'0'..=b'9' => byte - b'0',
-				b'A'..=b'F' => byte - (b'A' - 10),
-				b'a'..=b'f' => byte - (b'a' - 10),
-				_ => return None
-			});
+			color = (color << 4)
+				+ (match byte {
+					b'0'..=b'9' => byte - b'0',
+					b'A'..=b'F' => byte - (b'A' - 10),
+					b'a'..=b'f' => byte - (b'a' - 10),
+					_ => return None
+				});
 		}
 
 		Some(color)

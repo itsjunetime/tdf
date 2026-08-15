@@ -8,7 +8,7 @@ use flume::{Receiver, SendError, Sender, TryRecvError};
 use futures_util::stream::StreamExt as _;
 use image::{DynamicImage, codecs::pnm::PnmDecoder};
 use kittage::NumberOrId;
-use ratatui::layout::Rect;
+use ratatui::prelude::Size;
 use ratatui_image::{
 	Resize,
 	picker::{Picker, ProtocolType},
@@ -27,7 +27,7 @@ pub enum MaybeTransferred {
 	Transferred(kittage::ImageId)
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub enum ConvertedImage {
 	Generic(Protocol),
 	Kitty {
@@ -42,8 +42,8 @@ impl ConvertedImage {
 	pub fn w_h(&self) -> (u16, u16) {
 		match self {
 			Self::Generic(prot) => {
-				let a = prot.area();
-				(a.width, a.height)
+				let Size { width, height } = prot.size();
+				(width, height)
 			}
 			Self::Kitty {
 				img: _,
@@ -134,11 +134,9 @@ pub async fn run_conversion_loop(
 				.for_each(|(_, _, px)| px.0[2] = px.0[2].saturating_sub(u8::MAX / 2));
 		}
 
-		let img_area = Rect {
+		let img_size = Size {
 			width: page_info.img_data.cell_w,
-			height: page_info.img_data.cell_h,
-			x: 0,
-			y: 0
+			height: page_info.img_data.cell_h
 		};
 
 		let dyn_img = DynamicImage::ImageRgb8(dyn_img);
@@ -174,7 +172,7 @@ pub async fn run_conversion_loop(
 			}
 			_ => ConvertedImage::Generic(
 				picker
-					.new_protocol(dyn_img, img_area, Resize::None)
+					.new_protocol(dyn_img, img_size, Resize::Crop(None))
 					.map_err(|e| {
 						RenderError::Converting(format!(
 							"Couldn't convert DynamicImage to ratatui image: {e}"

@@ -349,8 +349,8 @@ impl Tui {
 			}
 		}
 
-		let width = (img_section_w * f32::from(font_size.0)) as u32;
-		let height = (img_section_h * f32::from(font_size.1)) as u32;
+		let width = (img_section_w * f32::from(font_size.width)) as u32;
+		let height = (img_section_h * f32::from(font_size.height)) as u32;
 
 		zoom.cell_pan_from_left = zoom
 			.cell_pan_from_left
@@ -367,8 +367,8 @@ impl Tui {
 				y: img_area.y
 			},
 			display_loc: DisplayLocation {
-				x: u32::from(zoom.cell_pan_from_left) * u32::from(font_size.0),
-				y: u32::from(zoom.cell_pan_from_top) * u32::from(font_size.1),
+				x: u32::from(zoom.cell_pan_from_left) * u32::from(font_size.width),
+				y: u32::from(zoom.cell_pan_from_top) * u32::from(font_size.height),
 				width,
 				height,
 				columns: img_area.width,
@@ -409,7 +409,7 @@ impl Tui {
 			// resize this time), then go through every element in the buffer where any Image would
 			// be written and set to skip it so that ratatui doesn't spend a lot of time diffing it
 			// each re-render
-			frame.render_widget(Skip::new(true), img_area);
+			frame.render_widget(Skip, img_area);
 			return KittyDisplay::NoChange;
 		}
 

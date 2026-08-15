@@ -4,7 +4,10 @@ use crossterm::terminal::WindowSize;
 use flume::{Sender, r#async::RecvStream, unbounded};
 use futures_util::stream::StreamExt as _;
 use ratatui::layout::Rect;
-use ratatui_image::picker::{Picker, ProtocolType};
+use ratatui_image::{
+	FontSize,
+	picker::{Picker, ProtocolType}
+};
 use tdf::{
 	converter::{ConvertedPage, ConverterMsg, run_conversion_loop},
 	renderer::{RenderError, RenderInfo, RenderNotif, fill_default, start_rendering}
@@ -54,7 +57,10 @@ pub struct RenderState {
 	pub to_render_tx: Sender<RenderNotif>
 }
 
-const FONT_SIZE: (u16, u16) = (8, 14);
+const FONT_SIZE: FontSize = FontSize {
+	width: 8,
+	height: 14
+};
 
 pub fn start_rendering_loop(
 	path: impl AsRef<Path>,
@@ -74,8 +80,8 @@ pub fn start_rendering_loop(
 	let size = WindowSize {
 		columns,
 		rows,
-		height: rows * FONT_SIZE.1,
-		width: columns * FONT_SIZE.0
+		height: rows * FONT_SIZE.height,
+		width: columns * FONT_SIZE.width
 	};
 
 	let main_area = Rect {

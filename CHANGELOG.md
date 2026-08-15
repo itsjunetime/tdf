@@ -2,6 +2,7 @@
 
 - Added windows support! (thank you to [@jarjk](https://github.com/jarjk) for helping out!)
 - Added keybindings (`0`/`$`) to scroll to left or right side of zoomed-in image ([#131](https://github.com/itsjunetime/tdf/pull/131), thank you [@IshDeshpa](https://github.com/IshDeshpa)!)
+- Added `-t` flag to use terminal foreground/background colors in pdf rendering ([#138](https://github.com/itsjunetime/tdf/pull/138), thank you [@unorsk](https://github.com/unorsk)!
 - Fixed issue with images clearing/flashing after displaying a certain number on kitty
 - (Internal) decreased runtime footprint of tokio runtime
 

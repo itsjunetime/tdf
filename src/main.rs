@@ -610,41 +610,53 @@ fn query_osc_color(osc: u8, handle: &mut std::io::StdinLock<'_>) -> Option<i32> 
 	print!("\x1b]{osc};?\x1b\\");
 	std::io::stdout().flush().ok()?;
 
-	let mut buf = Vec::with_capacity(64);
-	let mut prev = None::<u8>;
-	let mut byte = [0u8; 1];
-	loop {
-		handle.read_exact(&mut byte).ok()?;
-		let b = byte[0];
+	// response looks like "\u{1b}]10;rgb:rrrr/bbbb/gggg\u{1b}\\" or "\u{1b}]10;rgb:rr/bb/gg\u{1b}\\"
+	// or if osc is 11, "\u{1b}]11;rgb:rrrr/bbbb/gggg\u{1b}\\" or "\u{1b}]11;rgb:rr/bb/gg\u{1b}\\"
 
-		if b == 0x07 || b == 0x9c {
-			break;
-		}
-		if prev == Some(0x1b) && b == b'\\' {
-			buf.pop();
-			break;
-		}
+	// We expect the response to be either 19 or 25 bytes.
+	let mut response_buf = [0u8; 25];
 
-		buf.push(b);
-		prev = Some(b);
+	handle.read_exact(&mut response_buf[..19])
+		.inspect_err(|e| eprintln!("Couldn't get a response from your terminal for querying OSC {osc}; please file a bug with tdf with your terminal emulator (underlying err: {e})"))
+		.ok()?;
+
+	let two_digit_colors = response_buf[11] == b'/';
+
+	if !two_digit_colors {
+		handle.read_exact(&mut response_buf[19..])
+			.inspect_err(|e| eprintln!("Couldn't get a response from your terminal for querying OSC {osc}; please file a bug with tdf with your terminal emulator (underlying err: {e})"))
+			.ok()?;
 	}
 
-	let input = core::str::from_utf8(&buf).ok()?;
-	let rgb_str = input.split("rgb:").nth(1)?;
+	osc_response_buf_to_color(response_buf)
+}
 
-	let mut parts = rgb_str.split('/');
-	let parse = |hex: &str| -> Option<u8> {
-		let val = u16::from_str_radix(hex, 16).ok()?;
-		Some(if hex.len() <= 2 {
-			val as u8
-		} else {
-			(val >> 8) as u8
-		})
-	};
+fn osc_response_buf_to_color(response_buf: [u8; 25]) -> Option<i32> {
+	fn parse(ascii_hex_bytes: &[u8]) -> Option<u8> {
+		let mut color = 0;
 
-	let r = parse(parts.next()?)?;
-	let g = parse(parts.next()?)?;
-	let b = parse(parts.next()?)?;
+		for byte in ascii_hex_bytes {
+			color = (color << 4) + (match byte {
+				b'0'..=b'9' => byte - b'0',
+				b'A'..=b'F' => byte - (b'A' - 10),
+				b'a'..=b'f' => byte - (b'a' - 10),
+				_ => return None
+			});
+		}
+
+		Some(color)
+	}
+
+	let two_digit_colors = response_buf[11] == b'/';
+
+	// this is minimimal validation.
+	// the response either has `rrrr/gggg/bbbb` or `rr/gg/bb` starting at byte 9.
+	// So we grab the first two digits out of the r, g, and b sections (since we can only support
+	// 8-bit colors with mupdf; we can't do the 16-bits that the terminal might respond with), we
+	// parse them, and we return it as an i32.
+	let r = parse(&response_buf[9..11])?;
+	let g = parse(&response_buf[if two_digit_colors { 12..14 } else { 14..16 }])?;
+	let b = parse(&response_buf[if two_digit_colors { 15..17 } else { 19..21 }])?;
 
 	Some(i32::from_be_bytes([0, r, g, b]))
 }
@@ -714,4 +726,20 @@ fn get_font_size_through_stdio() -> Result<(u16, u16), WrappedErr> {
 	})?;
 
 	Ok((w, h))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn osc_response_parsing() {
+		fn eq(bytes: [u8; 25], r: u8, g: u8, b: u8) {
+			let resp = osc_response_buf_to_color(bytes);
+			assert_eq!(resp, Some(i32::from_be_bytes([0, r, g, b])));
+		}
+
+		eq(*b"\x1b]10;rgb:11/22/33\x1b\\000000", 0x11, 0x22, 0x33);
+		eq(*b"\x1b]11;rgb:aa11/23bf/fff0\x1b1", 0xaa, 0x23, 0xff);
+	}
 }
